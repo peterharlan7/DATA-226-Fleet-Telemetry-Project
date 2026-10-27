@@ -58,7 +58,7 @@ A full flow diagram will be added in `docs/`.
 4. Start Kafka and Spark: `docker compose up -d` (docker-compose.yml added in backlog item B2).
 
 ## Project links
-
+- https://github.com/peterharlan7/DATA-226-Fleet-Telemetry-Project/tree/main
 - Trello board (sprints and backlog): <add link>
 - Overleaf report: <add link>
 - Elevator pitch video: <add link>
