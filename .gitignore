@@ -1,0 +1,43 @@
+# Secrets — never commit API keys
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data and large outputs (keep the repo small)
+data/*
+!data/README.md
+*.parquet
+*.pb
+*.tfrecord*
+*.pkl
+spark-warehouse/
+checkpoints/
+metastore_db/
+derby.log
+
+# Spark / Kafka logs
+logs/
+*.log
+
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
