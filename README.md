@@ -103,3 +103,25 @@ A full flow diagram will be added in `docs/`.
 | Ashritha Achutharaman | Ingestion and Kafka lead; Product Owner |
 | Peter Harlan | Spark and algorithms lead; Scrum Master (odd sprints) |
 | Jason Letargo | Storage, benchmarking and privacy lead; Scrum Master (even sprints) |
+
+## Running the producers
+
+All events follow the common schema in `ingestion/schema.py` (timestamps are epoch milliseconds).
+Run these from the repo root with Kafka up (`docker compose up -d`) and a key in `.env`:
+
+| Script | What it is | Run it |
+| --- | --- | --- |
+| `ingestion/producer_all.py` | **Main producer.** Live vehicle positions from 511, one request per agency, so `source` is the agency code (SF, SC, AC, ...) | `python ingestion/producer_all.py --agencies SF,SC,AC` (use `--list` to see all 511 codes) |
+| `ingestion/producer_bart.py` | BART trip delays (BART has no vehicle-position feed) | `python ingestion/producer_bart.py` |
+| `ingestion/producer_vta.py` | One-feed VTA producer used for the Trello card demo | `python ingestion/producer_vta.py --once` |
+| `ingestion/producer_511.py` | Shared functions only (not a program) | imported by the scripts above |
+| `ingestion/av_replay.py`, `record_stream.py` | Replay and recording tools for the benchmarks; replays go to `replay-*` topics and are tagged with a Kafka header | see the docstring in each file |
+| `ingestion/simulator_producer.py` | Simulated data (source `SIM`), testing only | `python ingestion/simulator_producer.py` |
+
+Vehicle ids are hashed at ingestion (B13, `ingestion/hashing.py`) and `event_id` is built from the hashed id, so raw ids never reach Kafka.
+The producers need `VEHICLE_ID_SALT` in `.env` (ask Jason; it must be the same for everyone) and stop at start-up if it is missing.
+
+**Live dashboard: [http://localhost:8000](http://localhost:8000)** (real Kafka data, updates every 2 seconds). Start it with `./demo.sh`, or run `python dashboard/viz_web.py` after the producers are running. A screenshot of a real run is in `docs/dashboard.png`.
+
+Docker Compose also starts MongoDB (`mongo`, port 27017) for the raw-event store (B11). Its address is `MONGO_URI` in `.env`.
+Checks: `./producer_check.sh SC` (producer to Kafka), `python ingestion/check_real.py` (only real data, follows the schema), `./spark_check.sh` (Kafka to Spark to Parquet).
