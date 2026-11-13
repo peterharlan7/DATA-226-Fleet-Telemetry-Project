@@ -1,0 +1,196 @@
+{
+  "events": 44363,
+  "bloom": {
+    "true_duplicates": 0,
+    "flagged": 0,
+    "missed": 0,
+    "false_positives": 0,
+    "false_positive_rate_pct": 0.0,
+    "target_rate_pct": 1.0,
+    "memory_bytes": 3594397,
+    "bits_m": 28755176,
+    "hashes_k": 7
+  },
+  "flajolet_martin": {
+    "memory_bytes_per_agency": 512,
+    "per_agency": {
+      "SC": {
+        "distinct_vehicles_exact": 461,
+        "distinct_vehicles_fm": 559,
+        "fm_error_pct": 21.2
+      },
+      "SF": {
+        "distinct_vehicles_exact": 740,
+        "distinct_vehicles_fm": 760,
+        "fm_error_pct": 2.7
+      }
+    }
+  },
+  "reservoir": {
+    "k": 20,
+    "seen": 44363,
+    "sample": [
+      {
+        "source": "SF",
+        "route_id": "L",
+        "vehicle_id": "59dca5dacc1b5d1ab91d2775b7520dc0",
+        "event_ts": 1794604915000,
+        "lat": 37.74140548706055,
+        "lon": -122.470458984375
+      },
+      {
+        "source": "SC",
+        "route_id": "64A",
+        "vehicle_id": "382ebb931bb1e2cc8ea5f8cc98e23230",
+        "event_ts": 1794602492000,
+        "lat": 37.3354377746582,
+        "lon": -121.8923110961914
+      },
+      {
+        "source": "SF",
+        "route_id": null,
+        "vehicle_id": "9c6f8f367c14983612111a18e1608d0e",
+        "event_ts": 1794604651000,
+        "lat": 37.75178909301758,
+        "lon": -122.38448333740234
+      },
+      {
+        "source": "SF",
+        "route_id": "F",
+        "vehicle_id": "3ee3d6a1d677969b8639d50e6f3d9261",
+        "event_ts": 1794603983000,
+        "lat": 37.80256652832031,
+        "lon": -122.40059661865234
+      },
+      {
+        "source": "SF",
+        "route_id": null,
+        "vehicle_id": "4c6a0869480276d0cf508162f98576d3",
+        "event_ts": 1794603455000,
+        "lat": 37.78435516357422,
+        "lon": -122.4464111328125
+      },
+      {
+        "source": "SF",
+        "route_id": "28",
+        "vehicle_id": "17a070c45a71d74b1289c0e2e72c1bf9",
+        "event_ts": 1794603858000,
+        "lat": 37.70589828491211,
+        "lon": -122.46871185302734
+      },
+      {
+        "source": "SC",
+        "route_id": null,
+        "vehicle_id": "9928e4bf12a4d3ecf1898dab3898a4cf",
+        "event_ts": 1794605892000,
+        "lat": 37.337669372558594,
+        "lon": -121.89167022705078
+      },
+      {
+        "source": "SF",
+        "route_id": "38",
+        "vehicle_id": "ae03b0ab9c6b3f5d97acfc394d8f6038",
+        "event_ts": 1794602801000,
+        "lat": 37.780723571777344,
+        "lon": -122.47351837158203
+      },
+      {
+        "source": "SC",
+        "route_id": null,
+        "vehicle_id": "c431aed2ec6a814394b2b1ff6a228d12",
+        "event_ts": 1794603393000,
+        "lat": 37.355716705322266,
+        "lon": -121.9084701538086
+      },
+      {
+        "source": "SF",
+        "route_id": "15",
+        "vehicle_id": "8c05f317cb3dbccd34f38e9c8a8397cf",
+        "event_ts": 1794603858000,
+        "lat": 37.760616302490234,
+        "lon": -122.3886947631836
+      },
+      {
+        "source": "SF",
+        "route_id": null,
+        "vehicle_id": "5095c6f1885c814cf5a846db406c7ed4",
+        "event_ts": 1794606493000,
+        "lat": 37.806800842285156,
+        "lon": -122.42079162597656
+      },
+      {
+        "source": "SC",
+        "route_id": "23",
+        "vehicle_id": "61e9dcecff31f7377badc8c8764ff422",
+        "event_ts": 1794604047000,
+        "lat": 37.337345123291016,
+        "lon": -121.88814544677734
+      },
+      {
+        "source": "SC",
+        "route_id": "20",
+        "vehicle_id": "f19931b4327070050b99b7b110e6c3e7",
+        "event_ts": 1794604568000,
+        "lat": 37.404571533203125,
+        "lon": -121.90455627441406
+      },
+      {
+        "source": "SF",
+        "route_id": "38R",
+        "vehicle_id": "6c2b59662bdf0e6a582454a09295b91b",
+        "event_ts": 1794606493000,
+        "lat": 37.780799865722656,
+        "lon": -122.47209167480469
+      },
+      {
+        "source": "SC",
+        "route_id": "Blue Line",
+        "vehicle_id": "ed6a5d741047939d06c254b08fda8418",
+        "event_ts": 1794605363000,
+        "lat": 37.31896209716797,
+        "lon": -121.8899154663086
+      },
+      {
+        "source": "SF",
+        "route_id": "1",
+        "vehicle_id": "28ddc6a6b74d4878e044f5819e7b23a5",
+        "event_ts": 1794603858000,
+        "lat": 37.79545974731445,
+        "lon": -122.39715576171875
+      },
+      {
+        "source": "SF",
+        "route_id": null,
+        "vehicle_id": "11c14c60141ba53f222c11f9dffff6a0",
+        "event_ts": 1794606352000,
+        "lat": 37.75156784057617,
+        "lon": -122.38479614257812
+      },
+      {
+        "source": "SF",
+        "route_id": "29",
+        "vehicle_id": "8e26148fd3dfde2c0d1cfe9356275d72",
+        "event_ts": 1794606352000,
+        "lat": 37.72246551513672,
+        "lon": -122.39568328857422
+      },
+      {
+        "source": "SC",
+        "route_id": null,
+        "vehicle_id": "b54f24da27710d59c222ff73090afc37",
+        "event_ts": 1794604707000,
+        "lat": 37.353336334228516,
+        "lon": -121.9092788696289
+      },
+      {
+        "source": "SF",
+        "route_id": null,
+        "vehicle_id": "e22d5bc431ca9cbb0c556ac97a85dc6c",
+        "event_ts": 1794603455000,
+        "lat": 37.78417205810547,
+        "lon": -122.44660949707031
+      }
+    ]
+  },
+  "exact_check_memory_estimate_bytes": 5323560
+}
