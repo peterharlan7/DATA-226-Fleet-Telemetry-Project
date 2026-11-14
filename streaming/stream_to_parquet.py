@@ -57,7 +57,7 @@ def read_stream(spark, args, schema):
         os.makedirs(args.input, exist_ok=True)
         return (spark.readStream
                 .schema(schema)                  # streaming file sources require a schema
-                .option("maxFilesPerTrigger", 50)
+                .option("maxFilesPerTrigger", getattr(args, "max_files", 50))
                 .json(args.input))
 
     raw = (spark.readStream.format("kafka")

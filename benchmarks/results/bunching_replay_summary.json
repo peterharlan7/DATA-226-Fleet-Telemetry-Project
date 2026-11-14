@@ -1,0 +1,32 @@
+{
+  "settings": {
+    "source": "files",
+    "input": "data/replay_in",
+    "topic": "vehicle-positions",
+    "output": "data/alerts/bunching_replay",
+    "checkpoint": "data/checkpoints/bunching_replay",
+    "trigger": 1,
+    "max_distance": 200,
+    "max_time_gap": 60,
+    "window": 60,
+    "watermark": 30,
+    "lookback": 300,
+    "min_move": 50,
+    "min_history": 30,
+    "tandem": 40,
+    "max_files": 1,
+    "quiet": true,
+    "summary": "benchmarks/results/bunching_replay_summary.json"
+  },
+  "windows": 193008,
+  "alerts": 4551,
+  "close_pairs": 20926,
+  "categories": {
+    "no_history": 4149,
+    "layover": 7763,
+    "moving": 4126,
+    "one_parked": 4463,
+    "same_stop": 313,
+    "tandem": 112
+  }
+}
