@@ -1,0 +1,160 @@
+{
+  "settings": {
+    "input": "data/replay_in",
+    "grid": 0.002,
+    "min_cells": 5,
+    "threshold": 0.5,
+    "sample": 2000,
+    "tables": "1,2,4,8,16",
+    "seed": 7,
+    "out": "benchmarks/results"
+  },
+  "trips": 10876,
+  "trips_per_source": {
+    "SF": 7998,
+    "SC": 2878
+  },
+  "sample": {
+    "trips": 2000,
+    "pairs": 1999000,
+    "similar_pairs": 268,
+    "exact_seconds": 2.4
+  },
+  "recall_vs_tables": [
+    {
+      "hash_tables": 1,
+      "recall": 0.4701,
+      "pairs_found": 126,
+      "false_pairs": 0,
+      "seconds": 1.73
+    },
+    {
+      "hash_tables": 2,
+      "recall": 0.8022,
+      "pairs_found": 215,
+      "false_pairs": 0,
+      "seconds": 0.53
+    },
+    {
+      "hash_tables": 4,
+      "recall": 0.9776,
+      "pairs_found": 262,
+      "false_pairs": 0,
+      "seconds": 0.42
+    },
+    {
+      "hash_tables": 8,
+      "recall": 1.0,
+      "pairs_found": 268,
+      "false_pairs": 0,
+      "seconds": 0.52
+    },
+    {
+      "hash_tables": 16,
+      "recall": 1.0,
+      "pairs_found": 268,
+      "false_pairs": 0,
+      "seconds": 0.59
+    }
+  ],
+  "full_day": {
+    "pairs": 59138250,
+    "lsh_tables": 16,
+    "lsh_similar_pairs": 9669,
+    "lsh_seconds": 3.8,
+    "brute_force_seconds_est": 71,
+    "speedup_est": 18.6,
+    "same_route_share": 0.981,
+    "top_cross_route": [
+      {
+        "source": "SF",
+        "routes": [
+          "PH",
+          "PM"
+        ],
+        "pairs": 92
+      },
+      {
+        "source": "SF",
+        "routes": [
+          "5",
+          "5R"
+        ],
+        "pairs": 28
+      },
+      {
+        "source": "SF",
+        "routes": [
+          "14",
+          "14R"
+        ],
+        "pairs": 25
+      },
+      {
+        "source": "SF",
+        "routes": [
+          "38",
+          "38R"
+        ],
+        "pairs": 20
+      },
+      {
+        "source": "SF",
+        "routes": [
+          "9",
+          "9R"
+        ],
+        "pairs": 5
+      },
+      {
+        "source": "SF",
+        "routes": [
+          "8",
+          "8BX"
+        ],
+        "pairs": 2
+      },
+      {
+        "source": "SF",
+        "routes": [
+          "F",
+          "FBUS"
+        ],
+        "pairs": 2
+      },
+      {
+        "source": "SC",
+        "routes": [
+          "22",
+          "Rapid 522"
+        ],
+        "pairs": 1
+      }
+    ]
+  },
+  "query": {
+    "route_id": "23",
+    "neighbors": [
+      {
+        "route_id": "23",
+        "jaccard": 0.346
+      },
+      {
+        "route_id": "23",
+        "jaccard": 0.283
+      },
+      {
+        "route_id": "23",
+        "jaccard": 0.283
+      },
+      {
+        "route_id": "23",
+        "jaccard": 0.278
+      },
+      {
+        "route_id": "23",
+        "jaccard": 0.273
+      }
+    ]
+  }
+}
