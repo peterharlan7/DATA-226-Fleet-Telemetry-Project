@@ -1,0 +1,18 @@
+{
+  "routes": 125,
+  "ranked_routes": 65,
+  "no_history_p10": 0.1121,
+  "no_history_median": 0.2253,
+  "no_history_p90": 0.3849,
+  "gap_vs_no_history_corr": 0.43,
+  "agencies": {
+    "SC": {
+      "reports": 203928,
+      "no_route_share": 0.5296
+    },
+    "SF": {
+      "reports": 363219,
+      "no_route_share": 0.4102
+    }
+  }
+}
