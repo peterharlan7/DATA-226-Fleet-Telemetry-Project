@@ -37,7 +37,7 @@ A full flow diagram will be added in `docs/`.
 | `streaming/` | Spark Structured Streaming jobs and detectors |
 | `storage/` | MongoDB and warehouse schemas, sink code, sample queries |
 | `algorithms/` | Bloom filter, LSH, reservoir sampling, Flajolet-Martin, privacy |
-| `benchmarks/` | Benchmark harness, fault injection, results CSVs |
+| `benchmarks/` | Benchmark harness, fault injection (`FAULT_INJECTION.md`), design comparison (`DESIGN_COMPARISON.md`), results CSVs |
 | `notebooks/` | Exploration and analysis notebooks (each also exported to `.py`) |
 | `docs/` | Diagrams, meeting minutes, evidence for the rubric appendix |
 | `report/` | LaTeX source of the IEEE report (synced from Overleaf) |

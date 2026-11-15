@@ -60,11 +60,15 @@ def read_stream(spark, args, schema):
                 .option("maxFilesPerTrigger", getattr(args, "max_files", 50))
                 .json(args.input))
 
-    raw = (spark.readStream.format("kafka")
-           .option("kafka.bootstrap.servers", args.bootstrap)
-           .option("subscribe", args.topic)
-           .option("startingOffsets", "earliest")
-           .load())
+    reader = (spark.readStream.format("kafka")
+              .option("kafka.bootstrap.servers", args.bootstrap)
+              .option("subscribe", args.topic)
+              .option("startingOffsets", "earliest"))
+    if getattr(args, "max_offsets", None):
+        # Cap records per micro-batch, so a topic that is already full (a replay) is read
+        # in many small batches, like a live feed, instead of one big one (B25).
+        reader = reader.option("maxOffsetsPerTrigger", args.max_offsets)
+    raw = reader.load()
     # Kafka gives bytes in a 'value' column; turn them into our columns.
     return (raw.select(from_json(col("value").cast("string"), schema).alias("e"))
                .select("e.*"))
