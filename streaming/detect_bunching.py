@@ -23,6 +23,7 @@ How it works:
      Only tandem / same_stop / moving count as bunching (is_bunching = true).
      --min-move 0 turns the refinement off (the original raw detector).
   5. Write every close pair to Parquet (data/alerts/bunching) and print the bunching ones.
+     With --mongo, also insert the bunching ones into the MongoDB alerts collection (B11).
 
 Run from the repo root (start it before the feed):
     python streaming/detect_bunching.py
@@ -220,6 +221,12 @@ def build_query(spark, args):
         alerts.unpersist()
 
         bunched = [r for r in rows if r["is_bunching"]]
+        if bunched and args.mongo:
+            # Only real bunching goes to the operational alerts collection; filtered-out
+            # close pairs (layover, one_parked, no_history) stay in Parquet for analysis.
+            from storage.mongo_sink import write_alerts
+            new = write_alerts([r.asDict() for r in bunched], alert_type="bunching")
+            print(f"  mongo alerts: {new} new of {len(bunched)}", flush=True)
         stats["windows"] += n_windows
         stats["close_pairs"] += len(rows)
         stats["alerts"] += len(bunched)
@@ -269,6 +276,8 @@ def main():
     p.add_argument("--quiet", action="store_true",
                    help="don't print every alert; show event-time progress instead (long replays)")
     p.add_argument("--summary", default=None, help="write category counts to this JSON file at stop")
+    p.add_argument("--mongo", action="store_true",
+                   help="also write each alert to the MongoDB alerts collection (B11, MONGO_URI)")
     args = p.parse_args()
 
     spark = build_spark(use_kafka=(args.source == "kafka"))
