@@ -164,29 +164,37 @@ def _closest_pairs(reports, max_distance_m, max_time_gap_s):
     return pairs
 
 
-def build_query(spark, args):
-    from pyspark.sql.functions import (col, collect_list, count, current_timestamp,
-                                       explode, lit, struct, timestamp_millis, udf, window)
-    from pyspark.sql.types import (ArrayType, BooleanType, DoubleType, StringType,
-                                   StructField, StructType)
+def route_windows(events, args):
+    """Group reports into sliding windows per (source, route, direction).
 
-    schema = spark_schema(VEHICLE_EVENT_FIELDS)
-    events = (read_stream(spark, args, schema)
-              .where(col("event_id").isNotNull()
-                     & col("route_id").isNotNull()
-                     & col("direction_id").isNotNull())
-              .withColumn("event_time", timestamp_millis(col("event_ts")))
-              .withWatermark("event_time", f"{args.watermark} seconds"))
+    Shared by the streaming job and the offline ground-truth scan (B18), so both
+    use exactly the same windows. `events` may be a streaming or a batch DataFrame.
+    """
+    from pyspark.sql.functions import col, collect_list, count, struct, timestamp_millis, window
+
+    events = (events.where(col("event_id").isNotNull()
+                           & col("route_id").isNotNull()
+                           & col("direction_id").isNotNull())
+              .withColumn("event_time", timestamp_millis(col("event_ts"))))
+    if events.isStreaming:
+        events = events.withWatermark("event_time", f"{args.watermark} seconds")
 
     # Sliding window: (look-back + current minute) long, moving forward one minute at a time.
     # Every minute is the "current minute" of exactly one window.
     span = args.lookback + args.window if args.min_move > 0 else args.window
-    windows = (events
-               .groupBy(window(col("event_time"), f"{span} seconds", f"{args.window} seconds"),
-                        "source", "route_id", "direction_id")
-               .agg(collect_list(struct("vehicle_id", "event_ts", "lat", "lon", "trip_id",
-                                        "current_status", "stop_id")).alias("reports"),
-                    count("*").alias("n_reports")))
+    return (events
+            .groupBy(window(col("event_time"), f"{span} seconds", f"{args.window} seconds"),
+                     "source", "route_id", "direction_id")
+            .agg(collect_list(struct("vehicle_id", "event_ts", "lat", "lon", "trip_id",
+                                     "current_status", "stop_id")).alias("reports"),
+                 count("*").alias("n_reports")))
+
+
+def window_pairs(windows, args):
+    """Apply the bunching rule to closed windows: one row per close pair (shared with B18)."""
+    from pyspark.sql.functions import col, explode, lit, timestamp_millis, udf
+    from pyspark.sql.types import (ArrayType, BooleanType, DoubleType, StringType,
+                                   StructField, StructType)
 
     s, d, b = StringType(), DoubleType(), BooleanType()
     pair_type = ArrayType(StructType([StructField(n, t) for n, t in [
@@ -199,18 +207,26 @@ def build_query(spark, args):
     find_pairs = udf(lambda reports, end_ms: bunching_pairs(
         [r.asDict() for r in reports], end_ms - win_ms, max_d, max_gap, min_move, min_hist, tandem), pair_type)
 
+    end_ms = col("window.end").cast("long") * 1000
+    return (windows
+            .withColumn("pair", explode(find_pairs(col("reports"), end_ms)))
+            .select("source", "route_id", "direction_id",
+                    # Report the current minute, not the whole look-back window.
+                    timestamp_millis(end_ms - lit(win_ms)).alias("window_start"),
+                    col("window.end").alias("window_end"),
+                    "pair.*"))
+
+
+def build_query(spark, args):
+    from pyspark.sql.functions import current_timestamp
+
+    windows = route_windows(read_stream(spark, args, spark_schema(VEHICLE_EVENT_FIELDS)), args)
+
     stats = {"windows": 0, "alerts": 0, "close_pairs": 0, "categories": {}}
 
     def handle_batch(batch_df, batch_id):
         """Runs once per micro-batch on the windows that just closed."""
-        end_ms = col("window.end").cast("long") * 1000
-        alerts = (batch_df
-                  .withColumn("pair", explode(find_pairs(col("reports"), end_ms)))
-                  .select("source", "route_id", "direction_id",
-                          # Report the current minute, not the whole look-back window.
-                          timestamp_millis(end_ms - lit(win_ms)).alias("window_start"),
-                          col("window.end").alias("window_end"),
-                          "pair.*")
+        alerts = (window_pairs(batch_df, args)
                   .withColumn("detected_at", current_timestamp())
                   .persist())
         n_windows = batch_df.count()

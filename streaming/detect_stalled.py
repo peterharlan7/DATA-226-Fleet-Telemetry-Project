@@ -101,21 +101,28 @@ class StallTracker:
         return stall
 
 
-def build_query(spark, args, tracker):
-    from pyspark.sql.functions import col, collect_list, struct, timestamp_millis, udf, window
-    from pyspark.sql.types import DoubleType, LongType, StringType, StructField, StructType
+def vehicle_windows(events, args):
+    """Sliding windows of each vehicle's reports. Shared by the streaming job and the
+    offline ground-truth scan (B18); `events` may be a streaming or a batch DataFrame."""
+    from pyspark.sql.functions import col, collect_list, struct, timestamp_millis, window
 
-    events = (read_stream(spark, args, spark_schema(VEHICLE_EVENT_FIELDS))
-              .where(col("event_id").isNotNull() & col("vehicle_id").isNotNull())
-              .withColumn("event_time", timestamp_millis(col("event_ts")))
-              .withWatermark("event_time", f"{args.watermark} seconds"))
+    events = (events.where(col("event_id").isNotNull() & col("vehicle_id").isNotNull())
+              .withColumn("event_time", timestamp_millis(col("event_ts"))))
+    if events.isStreaming:
+        events = events.withWatermark("event_time", f"{args.watermark} seconds")
 
     span_s = args.stall_minutes * 60 + 120
-    windows = (events
-               .groupBy(window(col("event_time"), f"{span_s} seconds", "60 seconds"),
-                        "source", "vehicle_id")
-               .agg(collect_list(struct("event_ts", "lat", "lon", "route_id", "trip_id",
-                                        "current_status", "stop_id")).alias("reports")))
+    return (events
+            .groupBy(window(col("event_time"), f"{span_s} seconds", "60 seconds"),
+                     "source", "vehicle_id")
+            .agg(collect_list(struct("event_ts", "lat", "lon", "route_id", "trip_id",
+                                     "current_status", "stop_id")).alias("reports")))
+
+
+def window_stalls(windows, args):
+    """Apply the stall rule to closed windows: one row per window where the vehicle is stalled."""
+    from pyspark.sql.functions import col, udf
+    from pyspark.sql.types import DoubleType, LongType, StringType, StructField, StructType
 
     s, d, lg = StringType(), DoubleType(), LongType()
     stall_type = StructType([StructField(n, t) for n, t in [
@@ -123,13 +130,20 @@ def build_query(spark, args, tracker):
         ("route_id", s), ("trip_id", s), ("status", s), ("stop_id", s)]])
     stall_s, still_m, min_reports = args.stall_minutes * 60, args.still, args.min_reports
     check = udf(lambda reports: find_stall([r.asDict() for r in reports], stall_s, still_m, min_reports), stall_type)
+    return (windows.withColumn("stall", check(col("reports")))
+            .where(col("stall").isNotNull())
+            .select("source", "vehicle_id",
+                    (col("window.end").cast("long") * 1000).alias("window_end_ms"), "stall.*"))
 
+
+def build_query(spark, args, tracker):
+    from pyspark.sql.functions import col, timestamp_millis
+
+    windows = vehicle_windows(read_stream(spark, args, spark_schema(VEHICLE_EVENT_FIELDS)), args)
     stats = {"vehicle_windows": 0}
 
     def handle_batch(batch_df, batch_id):
-        found = (batch_df.withColumn("stall", check(col("reports")))
-                 .where(col("stall").isNotNull())
-                 .select("source", "vehicle_id", "stall.*")
+        found = (window_stalls(batch_df, args)
                  .orderBy("since_ts")
                  .collect())
         n_windows = batch_df.count()

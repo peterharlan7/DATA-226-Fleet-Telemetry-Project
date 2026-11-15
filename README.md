@@ -125,3 +125,25 @@ The producers need `VEHICLE_ID_SALT` in `.env` (ask Jason; it must be the same f
 
 Docker Compose also starts MongoDB (`mongo`, port 27017) for the raw-event store (B11). Its address is `MONGO_URI` in `.env`.
 Checks: `./producer_check.sh SC` (producer to Kafka), `python ingestion/check_real.py` (only real data, follows the schema), `./spark_check.sh` (Kafka to Spark to Parquet).
+
+## Ground truth: how accurate are the streaming detectors? (B18)
+
+The streaming detectors close each window after a short watermark, so reports that arrive late are dropped. [`streaming/ground_truth.py`](streaming/ground_truth.py) is a **batch** job that reads the whole Parquet archive and applies the **same rules with the same code** (the detectors' own window and rule functions, settings from `streaming/config.py`) but with no watermark. Its output is the exact answer. [`streaming/compare_ground_truth.py`](streaming/compare_ground_truth.py) scores the streaming alerts against it.
+
+| Detector | Ground-truth table | Matched on |
+| --- | --- | --- |
+| Bus bunching (B12) | `data/ground_truth/bunching` (every close pair, with `category` / `is_bunching`) | source, route, direction, minute, pair of buses |
+| Stalled vehicle (B16) | `data/ground_truth/stalled` (one row per stall, full duration) | source, vehicle, overlapping time |
+| Delay propagation (B15) | `data/ground_truth/delay_propagation` (knock-on delays: a late train followed by a late train at the same station) | source, route, station, pair of trains |
+
+```
+python streaming/ground_truth.py                 # archive -> data/ground_truth/*, benchmarks/results/ground_truth_summary.json
+python streaming/compare_ground_truth.py         # precision / recall per detector -> benchmarks/results/ground_truth_comparison.json
+```
+
+- Use the same settings for both (e.g. `--stall-minutes 1` on the detector and on `ground_truth.py`).
+- Ground-truth alerts in the last watermark before the archive ends are **pending** (the stream could not have closed them yet) and are left out of recall. `--since` / `--until` limit scoring to the time the streaming job ran.
+- For bunching misses and false alarms, the comparison prints why: the stream labelled the pair differently (e.g. `no_history` after late look-back reports were dropped), or never saw the pair close.
+- Trip updates are not in the Parquet archive yet, so delay-propagation ground truth reads `data/raw/trip_updates` if it exists, else the JSON-lines recording. There is no streaming delay detector yet, so that part is ground truth only until one writes to `data/alerts/delay_propagation`.
+
+Tests: `pytest streaming/test_ground_truth.py`.
