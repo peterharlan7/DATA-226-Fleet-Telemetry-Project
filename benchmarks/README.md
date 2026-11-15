@@ -65,6 +65,10 @@ time and spot a backlog building up.
   So `e2e_ms_p50 ≈ T/2 + batch_ms_mean` while Spark keeps up.
 - Once `batch_ms` exceeds T, each batch starts late and grows: `keeps_up` turns False and e2e latency climbs
   through the run. The highest rate that still keeps up is the sustainable throughput for that trigger.
+- A freshly started Spark JVM is slow for its first ~10 s of real load, which can make the first run of a sweep
+  look like it falls behind. So before the sweep, the harness does one discarded run of `--jvm-warmup` seconds
+  (default 20) at the highest rate. Sweeps made before this option existed (`b22_runs_20261114_2008.csv`) have
+  a cold first run.
 - Results depend on the machine (cores, disk). Record it alongside the CSV when you cite numbers.
 
 Tests for the helpers (no Kafka or Spark needed): `python -m pytest benchmarks`

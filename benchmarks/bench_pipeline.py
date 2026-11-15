@@ -30,6 +30,7 @@ Producer and Spark run on this machine, so both timestamps come from one clock.
 """
 
 import argparse
+import copy
 import csv
 import json
 import os
@@ -179,14 +180,14 @@ def check_kafka(bootstrap):
 
 # ---------------------------------------------------------------- one run
 
-def run_once(spark, args, rate, trigger_s, repeat):
+def run_once(spark, args, rate, trigger_s, repeat, label=None):
     from pyspark.sql.functions import col, floor, lit, when
     from pyspark.sql.functions import sum as fsum
     from streaming.stream_to_parquet import transform
     from ingestion.schema import VEHICLE_EVENT_FIELDS, spark_schema
     from pyspark.sql.functions import from_json
 
-    run_id = f"{datetime.now():%Y%m%d_%H%M%S}_r{int(rate)}_t{trigger_s:g}_{repeat}"
+    run_id = f"{datetime.now():%Y%m%d_%H%M%S}_r{int(rate)}_t{trigger_s:g}_{label or repeat}"
     topic = f"bench-{run_id}".replace(".", "-")
     out_dir = os.path.join(args.work_dir, run_id)
     config = {"run_id": run_id, "started_at": datetime.now().isoformat(timespec="seconds"),
@@ -196,107 +197,113 @@ def run_once(spark, args, rate, trigger_s, repeat):
           f"{args.duration:g} s + {args.warmup:g} s warm-up, sink {args.sink}", flush=True)
 
     create_topic(args.bootstrap, topic, args.partitions)
-    raw = (spark.readStream.format("kafka")
-           .option("kafka.bootstrap.servers", args.bootstrap)
-           .option("subscribe", topic)
-           .option("startingOffsets", "earliest")
-           .option("failOnDataLoss", "false")
-           .load())
-    parsed = raw.select(from_json(col("value").cast("string"),
-                                  spark_schema(VEHICLE_EVENT_FIELDS)).alias("e")).select("e.*")
-    events = transform(parsed)                     # same columns/watermark as the archive job
+    query = None
+    try:
+        raw = (spark.readStream.format("kafka")
+               .option("kafka.bootstrap.servers", args.bootstrap)
+               .option("subscribe", topic)
+               .option("startingOffsets", "earliest")
+               .option("failOnDataLoss", "false")
+               .load())
+        parsed = raw.select(from_json(col("value").cast("string"),
+                                      spark_schema(VEHICLE_EVENT_FIELDS)).alias("e")).select("e.*")
+        events = transform(parsed)                     # same columns/watermark as the archive job
 
-    lock = threading.Lock()
-    batches, e2e_hist, queue_hist = [], Counter(), Counter()
-    bucket = args.bucket_ms
+        lock = threading.Lock()
+        batches, e2e_hist, queue_hist = [], Counter(), Counter()
+        bucket = args.bucket_ms
 
-    def handle_batch(df, batch_id):
-        t_start = int(time.time() * 1000)
-        df = df.persist()
-        n_total = df.count()                       # forces the read from Kafka
-        t_read = int(time.time() * 1000)
-        if n_total == 0:
+        def handle_batch(df, batch_id):
+            t_start = int(time.time() * 1000)
+            df = df.persist()
+            n_total = df.count()                       # forces the read from Kafka
+            t_read = int(time.time() * 1000)
+            if n_total == 0:
+                df.unpersist()
+                return
+            if args.sink == "parquet":
+                (df.write.mode("append").partitionBy("event_date", "source")
+                   .parquet(os.path.join(out_dir, "parquet")))
+            else:
+                df.write.format("noop").mode("overwrite").save()
+            t_commit = int(time.time() * 1000)
+
+            # 1 ms (or --bucket-ms) histogram of commit latency, bench rows only; warm-up rows just counted
+            lat_bucket = floor((lit(t_commit) - col("ingest_ts")) / bucket) * bucket
+            rows = (df.groupBy(when(col("source") == BENCH_SOURCE, lat_bucket).alias("b"))
+                      .agg(fsum(lit(1)).alias("n")).collect())
             df.unpersist()
-            return
-        if args.sink == "parquet":
-            (df.write.mode("append").partitionBy("event_date", "source")
-               .parquet(os.path.join(out_dir, "parquet")))
-        else:
-            df.write.format("noop").mode("overwrite").save()
-        t_commit = int(time.time() * 1000)
+            hist = Counter({int(r["b"]): int(r["n"]) for r in rows if r["b"] is not None})
+            warm = sum(int(r["n"]) for r in rows if r["b"] is None)
+            n = sum(hist.values())
+            record = {"batch_id": batch_id, "start_ms": t_start, "commit_ms": t_commit, "rows": n,
+                      "warmup_rows": warm, "read_ms": t_read - t_start, "write_ms": t_commit - t_read,
+                      "batch_ms": t_commit - t_start,
+                      "queue_ms_p50": percentile_from_hist(shift_hist(hist, t_commit - t_start), 50),
+                      "e2e_ms_p50": percentile_from_hist(hist, 50),
+                      "e2e_ms_p95": percentile_from_hist(hist, 95),
+                      "e2e_ms_max": max(hist) if hist else None}
+            with lock:
+                batches.append(record)
+                e2e_hist.update(hist)
+                queue_hist.update(shift_hist(hist, t_commit - t_start))
+            if n and not args.quiet:
+                print(f"  batch {batch_id:>4}: {n:>7} rows | {record['batch_ms']:>6} ms | "
+                      f"e2e p50 {record['e2e_ms_p50']} ms p95 {record['e2e_ms_p95']} ms", flush=True)
 
-        # 1 ms (or --bucket-ms) histogram of commit latency, bench rows only; warm-up rows just counted
-        lat_bucket = floor((lit(t_commit) - col("ingest_ts")) / bucket) * bucket
-        rows = (df.groupBy(when(col("source") == BENCH_SOURCE, lat_bucket).alias("b"))
-                  .agg(fsum(lit(1)).alias("n")).collect())
-        df.unpersist()
-        hist = Counter({int(r["b"]): int(r["n"]) for r in rows if r["b"] is not None})
-        warm = sum(int(r["n"]) for r in rows if r["b"] is None)
-        n = sum(hist.values())
-        record = {"batch_id": batch_id, "start_ms": t_start, "commit_ms": t_commit, "rows": n,
-                  "warmup_rows": warm, "read_ms": t_read - t_start, "write_ms": t_commit - t_read,
-                  "batch_ms": t_commit - t_start,
-                  "queue_ms_p50": percentile_from_hist(shift_hist(hist, t_commit - t_start), 50),
-                  "e2e_ms_p50": percentile_from_hist(hist, 50),
-                  "e2e_ms_p95": percentile_from_hist(hist, 95),
-                  "e2e_ms_max": max(hist) if hist else None}
-        with lock:
-            batches.append(record)
-            e2e_hist.update(hist)
-            queue_hist.update(shift_hist(hist, t_commit - t_start))
-        if n and not args.quiet:
-            print(f"  batch {batch_id:>4}: {n:>7} rows | {record['batch_ms']:>6} ms | "
-                  f"e2e p50 {record['e2e_ms_p50']} ms p95 {record['e2e_ms_p95']} ms", flush=True)
+        query = (events.writeStream
+                 .foreachBatch(handle_batch)
+                 .option("checkpointLocation", os.path.join(out_dir, "checkpoint"))
+                 .trigger(processingTime=f"{trigger_s:g} seconds")
+                 .queryName(f"bench_{run_id}".replace(".", "_"))
+                 .start())
 
-    query = (events.writeStream
-             .foreachBatch(handle_batch)
-             .option("checkpointLocation", os.path.join(out_dir, "checkpoint"))
-             .trigger(processingTime=f"{trigger_s:g} seconds")
-             .queryName(f"bench_{run_id}".replace(".", "_"))
-             .start())
+        # Wait until the query has run its first (empty) batch, so start-up is not measured.
+        deadline = time.time() + 180
+        while query.lastProgress is None and time.time() < deadline:
+            if query.exception():
+                raise query.exception()
+            time.sleep(0.5)
 
-    # Wait until the query has run its first (empty) batch, so start-up is not measured.
-    deadline = time.time() + 180
-    while query.lastProgress is None and time.time() < deadline:
-        if query.exception():
-            raise query.exception()
-        time.sleep(0.5)
+        gen = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "benchmarks", "load_generator.py"),
+             "--topic", topic, "--bootstrap", args.bootstrap, "--rate", str(rate),
+             "--duration", str(args.duration), "--warmup", str(args.warmup),
+             "--delivery", args.delivery, "--seed", str(repeat + 1)],
+            capture_output=True, text=True)
+        if gen.returncode != 0:
+            raise RuntimeError(f"load generator failed:\n{gen.stderr[-2000:]}")
+        producer = json.loads(gen.stdout.strip().splitlines()[-1])
+        print(f"  producer: {producer['sent']} sent at {producer['producer_rate']} events/s, "
+              f"{producer['delivered']} delivered", flush=True)
 
-    gen = subprocess.run(
-        [sys.executable, os.path.join(ROOT, "benchmarks", "load_generator.py"),
-         "--topic", topic, "--bootstrap", args.bootstrap, "--rate", str(rate),
-         "--duration", str(args.duration), "--warmup", str(args.warmup),
-         "--delivery", args.delivery, "--seed", str(repeat + 1)],
-        capture_output=True, text=True)
-    if gen.returncode != 0:
-        query.stop()
-        raise RuntimeError(f"load generator failed:\n{gen.stderr[-2000:]}")
-    producer = json.loads(gen.stdout.strip().splitlines()[-1])
-    print(f"  producer: {producer['sent']} sent at {producer['producer_rate']} events/s, "
-          f"{producer['delivered']} delivered", flush=True)
+        # Drain: wait until every delivered bench event has been committed by Spark.
+        timeout = args.drain_timeout or max(60, 6 * trigger_s + args.duration)
+        deadline = time.time() + timeout
+        timed_out = False
+        while True:
+            with lock:
+                got = sum(b["rows"] for b in batches)
+            if got >= producer["delivered"]:
+                break
+            if query.exception():
+                raise query.exception()
+            if time.time() > deadline:
+                timed_out = True
+                print(f"  drain timed out after {timeout:g} s: {got}/{producer['delivered']} committed")
+                break
+            time.sleep(0.5)
 
-    # Drain: wait until every delivered bench event has been committed by Spark.
-    timeout = args.drain_timeout or max(60, 6 * trigger_s + args.duration)
-    deadline = time.time() + timeout
-    timed_out = False
-    while True:
-        with lock:
-            got = sum(b["rows"] for b in batches)
-        if got >= producer["delivered"]:
-            break
-        if query.exception():
-            raise query.exception()
-        if time.time() > deadline:
-            timed_out = True
-            print(f"  drain timed out after {timeout:g} s: {got}/{producer['delivered']} committed")
-            break
-        time.sleep(0.5)
-
-    progress = {p["batchId"]: p for p in query.recentProgress}
-    query.stop()
-    delete_topic(args.bootstrap, topic)
-    if not args.keep_output:
-        shutil.rmtree(out_dir, ignore_errors=True)
+        progress = {p["batchId"]: p for p in query.recentProgress}
+    finally:                                  # stop and clean up even if the run fails
+        if query is not None:
+            try:
+                query.stop()
+            except Exception:
+                pass
+        delete_topic(args.bootstrap, topic)
+        if not args.keep_output:
+            shutil.rmtree(out_dir, ignore_errors=True)
 
     t0 = producer["first_send_ms"]
     batch_rows = []
@@ -344,6 +351,8 @@ def main():
     p.add_argument("--repeats", type=int, default=1, help="runs per configuration")
     p.add_argument("--duration", type=float, default=45, help="seconds of measured load per run")
     p.add_argument("--warmup", type=float, default=5, help="seconds of unmeasured load before each run")
+    p.add_argument("--jvm-warmup", type=float, default=20,
+                   help="seconds of one discarded run before the sweep, to warm up the Spark JVM (0 = off)")
     p.add_argument("--partitions", type=int, default=3, help="partitions of each bench topic (live topics use 3)")
     p.add_argument("--sink", choices=["parquet", "noop"], default="parquet")
     p.add_argument("--delivery", choices=["at-most-once", "at-least-once", "exactly-once"],
@@ -371,6 +380,17 @@ def main():
     batches_csv = os.path.join(args.results_dir, f"b22_batches_{stamp}.csv")
     print(f"B22 sweep: rates {rates} x triggers {triggers} x {args.repeats} repeat(s), sink {args.sink}")
     print(f"Results: {runs_csv}\n         {batches_csv}")
+
+    if args.jvm_warmup > 0:
+        # A fresh Spark JVM is slow for its first ~10 s of real load (JIT, Kafka consumers, Parquet
+        # writers), which would make the first run look like it falls behind. Run once, discard it.
+        warm = copy.copy(args)
+        warm.duration, warm.warmup, warm.quiet = args.jvm_warmup, 0, True
+        print(f"\nSpark warm-up run ({args.jvm_warmup:g} s at {max(rates):g} events/s, not recorded)")
+        try:
+            run_once(spark, warm, max(rates), triggers[0], 0, label="warmup")
+        except Exception as e:
+            print(f"  warm-up failed ({e}); continuing")
 
     failures = 0
     for repeat in range(args.repeats):
