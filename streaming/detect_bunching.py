@@ -12,6 +12,7 @@ How it works:
   3. When a window closes, compare every pair of buses, using reports taken
      close together in time. Closer than max_distance_m -> bunching alert.
   4. Write alerts to Parquet (data/alerts/bunching) and print them.
+     With --mongo, also insert them into the MongoDB alerts collection (B11).
 
 Run from the repo root (start it before the feed):
     python streaming/detect_bunching.py
@@ -122,6 +123,10 @@ def build_query(spark, args):
         if rows:
             alerts.write.mode("append").parquet(args.output)
         alerts.unpersist()
+        if rows and args.mongo:
+            from storage.mongo_sink import write_alerts
+            new = write_alerts([r.asDict() for r in rows], alert_type="bunching")
+            print(f"  mongo alerts: {new} new of {len(rows)}", flush=True)
 
         stats["windows"] += n_windows
         stats["alerts"] += len(rows)
@@ -156,6 +161,8 @@ def main():
     p.add_argument("--max-time-gap", type=float, default=BUNCHING["max_time_gap_s"])
     p.add_argument("--window", type=int, default=BUNCHING["window_s"])
     p.add_argument("--watermark", type=int, default=BUNCHING["watermark_s"])
+    p.add_argument("--mongo", action="store_true",
+                   help="also write each alert to the MongoDB alerts collection (B11, MONGO_URI)")
     args = p.parse_args()
 
     spark = build_spark(use_kafka=(args.source == "kafka"))

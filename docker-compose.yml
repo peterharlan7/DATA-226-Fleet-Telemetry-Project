@@ -4,6 +4,8 @@ services:
     container_name: mongo
     ports:
       - "27017:27017"
+    volumes:
+      - mongo-data:/data/db           # alerts and latest positions survive `docker compose down`
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -72,3 +74,6 @@ services:
       SPARK_WORKER_MEMORY: 2g
     volumes:
       - ./data:/opt/data
+
+volumes:
+  mongo-data:

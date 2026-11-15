@@ -9,6 +9,7 @@ Run from the repo root:
     python streaming/stream_to_parquet.py                    # read data/stream_in (fake feed)
     python streaming/stream_to_parquet.py --source kafka     # read the Kafka topic
     python streaming/stream_to_parquet.py --count            # count rows already archived
+    python streaming/stream_to_parquet.py --source kafka --mongo   # also keep latest positions in MongoDB (B11)
 
 Stop with Ctrl+C. Restarting continues where it stopped, thanks to the checkpoint.
 """
@@ -25,6 +26,7 @@ from ingestion.schema import (TOPIC_VEHICLE_POSITIONS,  # noqa: E402
 
 OUTPUT_PATH = "data/raw/vehicle_events"
 CHECKPOINT_PATH = "data/checkpoints/raw_vehicle_events"
+MONGO_CHECKPOINT_PATH = "data/checkpoints/mongo_latest_positions"
 
 
 def build_spark(use_kafka):
@@ -94,7 +96,36 @@ def write_stream(df, args):
             .start())
 
 
-def report_progress(query):
+def write_latest_positions(events, args):
+    """Optional second query (--mongo, B11): keep each vehicle's newest position in MongoDB.
+
+    Only the newest report per vehicle in each micro-batch is sent, and MongoDB
+    keeps it only if it is newer than what is stored. Raw events stay in Parquet.
+    """
+    from pyspark.sql.functions import col, max_by, struct
+
+    from storage.mongo_sink import POSITION_FIELDS, upsert_latest_positions
+
+    def handle_batch(batch_df, batch_id):
+        latest = (batch_df
+                  .groupBy("source", "vehicle_id")
+                  .agg(max_by(struct(*POSITION_FIELDS), col("event_ts")).alias("p"))
+                  .select("p.*")
+                  .collect())
+        if latest:
+            inserted, moved = upsert_latest_positions([r.asDict() for r in latest])
+            print(f"  mongo latest_positions: {len(latest)} vehicles in batch {batch_id} "
+                  f"({inserted} new, {moved} moved forward)", flush=True)
+
+    return (events.where(col("event_id").isNotNull() & col("vehicle_id").isNotNull())
+            .writeStream
+            .foreachBatch(handle_batch)
+            .option("checkpointLocation", args.mongo_checkpoint)
+            .trigger(processingTime=f"{args.trigger} seconds")
+            .start())
+
+
+def report_progress(query, also_stop=()):
     """Print throughput for every micro-batch until Ctrl+C, then stop cleanly."""
     stop = {"requested": False}
 
@@ -123,6 +154,8 @@ def report_progress(query):
 
     print("Stopping...")
     query.stop()
+    for q in also_stop:
+        q.stop()
     # Count every batch, including one that finished while stopping.
     total_rows = sum(p["numInputRows"] for p in query.recentProgress)
     print(f"Stopped. Rows processed this run: {total_rows}")
@@ -144,6 +177,9 @@ def main():
     p.add_argument("--checkpoint", default=CHECKPOINT_PATH)
     p.add_argument("--trigger", type=int, default=10, help="seconds between micro-batches")
     p.add_argument("--count", action="store_true", help="count archived rows and exit")
+    p.add_argument("--mongo", action="store_true",
+                   help="also keep each vehicle's latest position in MongoDB (B11, MONGO_URI)")
+    p.add_argument("--mongo-checkpoint", default=MONGO_CHECKPOINT_PATH)
     args = p.parse_args()
 
     spark = build_spark(use_kafka=(args.source == "kafka" and not args.count))
@@ -152,9 +188,12 @@ def main():
         return
 
     schema = spark_schema(VEHICLE_EVENT_FIELDS)
-    query = write_stream(transform(read_stream(spark, args, schema)), args)
-    print(f"Streaming from {args.source} -> {args.output} (Ctrl+C to stop)")
-    report_progress(query)
+    events = read_stream(spark, args, schema)
+    query = write_stream(transform(events), args)
+    extra = [write_latest_positions(events, args)] if args.mongo else []
+    print(f"Streaming from {args.source} -> {args.output}"
+          f"{' + MongoDB latest_positions' if args.mongo else ''} (Ctrl+C to stop)")
+    report_progress(query, also_stop=extra)
 
 
 if __name__ == "__main__":

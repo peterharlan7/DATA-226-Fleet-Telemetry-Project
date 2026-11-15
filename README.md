@@ -22,7 +22,7 @@ GTFS-realtime feeds (511 / BART / VTA)
         ▼
    Apache Kafka  ──►  Spark Structured Streaming (streaming/)
                           │  windowed features, detectors, Bloom filter dedup
-                          ├──►  Raw-event store: MongoDB
+                          ├──►  Operational store: MongoDB (latest position per vehicle, alerts)
                           ├──►  Warehouse: ClickHouse or DuckDB (alerts, summaries)
                           └──►  Parquet archive (data/, not committed)
 ```
@@ -123,5 +123,27 @@ The producers need `VEHICLE_ID_SALT` in `.env` (ask Jason; it must be the same f
 
 **Live dashboard: [http://localhost:8000](http://localhost:8000)** (real Kafka data, updates every 2 seconds). Start it with `./demo.sh`, or run `python dashboard/viz_web.py` after the producers are running. A screenshot of a real run is in `docs/dashboard.png`.
 
-Docker Compose also starts MongoDB (`mongo`, port 27017) for the raw-event store (B11). Its address is `MONGO_URI` in `.env`.
+Docker Compose also starts MongoDB (`mongo`, port 27017, data kept in the `mongo-data` volume). Its address is `MONGO_URI` in `.env`.
+
+## MongoDB: latest positions and alerts (B11)
+
+MongoDB is the **operational store**: what is true right now. Raw events are **not** copied into it; the Parquet archive (`data/raw/vehicle_events`) stays the history for scans and analysis. All the code is in [`storage/mongo_sink.py`](storage/mongo_sink.py).
+
+| Collection | One document per | Written by | Indexes |
+| --- | --- | --- | --- |
+| `latest_positions` | vehicle, keyed by (`source`, `vehicle_id`) | `stream_to_parquet.py --mongo` | unique (`source`, `vehicle_id`); 2dsphere on `location` |
+| `alerts` | detector alert: `type`, `source`, `route_id`, `direction_id`, `window_start`, `window_end`, `vehicles`, `distance_m`, `detected_at` | `detect_bunching.py --mongo` | (`route_id`, `window_start`); `detected_at` |
+
+- A position replaces the stored one **only if its `event_ts` is newer**, so late or replayed reports never move a vehicle backwards.
+- Each alert has a deterministic `_id`, so a micro-batch that Spark re-runs after a crash does not store an alert twice.
+- Times are stored as UTC dates. Extra detector columns (e.g. `time_gap_s`) go under `details`.
+
+```
+docker compose up -d mongo
+python streaming/stream_to_parquet.py --source kafka --mongo   # Parquet archive + latest_positions
+python streaming/detect_bunching.py --source kafka --mongo     # Parquet alerts + MongoDB alerts
+python storage/mongo_sink.py                                   # counts, newest alerts, latest vehicles
+```
+
+Tests: `pytest storage/` (the MongoDB part is skipped when MongoDB is not running).
 Checks: `./producer_check.sh SC` (producer to Kafka), `python ingestion/check_real.py` (only real data, follows the schema), `./spark_check.sh` (Kafka to Spark to Parquet).
