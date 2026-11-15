@@ -15,6 +15,11 @@ Planted bunching: every N batches, two buses on the same route and direction are
 pushed together (60 m apart) for a few batches, then separated again. Each planted
 event is logged to data/planted_bunching.jsonl, so the detector can be checked
 against a known answer with streaming/evaluate_bunching.py.
+
+Planted stalls (B16 testing): every N batches, one bus stops dead for a few batches
+while still reporting IN_TRANSIT_TO (not waiting at a stop). Logged to
+data/planted_stalls.jsonl and checked with streaming/evaluate_stalled.py:
+    python streaming/fake_feed.py --batches 150 --stall-every 30 --stall-length 20
 """
 
 import argparse
@@ -129,6 +134,51 @@ class BunchingPlanter:
             f.write(json.dumps(record) + "\n")
 
 
+class StallPlanter:
+    """Freezes one bus in place (in service, not at a stop) for a while, and logs each stall."""
+
+    def __init__(self, vehicles, every, length, log_path, busy=lambda: ()):
+        self.vehicles, self.every, self.length, self.log_path = vehicles, every, length, log_path
+        self.busy = busy                    # vehicles used by the bunching planter right now
+        self.active = None
+        self.planted = 0
+
+    def before_batch(self, batch, now_ms):
+        if self.every <= 0:
+            return
+        if self.active is None and batch > 0 and batch % self.every == 0:
+            free = [v for v in self.vehicles if v not in self.busy()]
+            v = random.choice(free)
+            self.active = {"v": v, "home": (v["lat"], v["lon"]), "batches_left": self.length,
+                           "start_ts": now_ms - 20_000, "end_ts": now_ms}
+        if self.active:
+            v = self.active["v"]
+            v["lat"], v["lon"] = self.active["home"]       # undo this batch's movement
+            v["speed"], v["stalled"] = 0.0, True
+
+    def after_batch(self, now_ms):
+        if not self.active:
+            return
+        self.active["end_ts"] = now_ms
+        self.active["batches_left"] -= 1
+        if self.active["batches_left"] == 0:
+            v = self.active["v"]
+            v["stalled"], v["speed"] = False, random.uniform(3, 12)
+            self.planted += 1
+            os.makedirs(os.path.dirname(self.log_path) or ".", exist_ok=True)
+            with open(self.log_path, "a") as f:
+                f.write(json.dumps({"type": "planted_stall", "vehicle_id": v["vehicle_id"],
+                                    "route_id": v["route_id"], "start_ts": self.active["start_ts"],
+                                    "end_ts": now_ms}) + "\n")
+            self.active = None
+
+    def stopped(self):
+        if self.every > 0:
+            os.makedirs(os.path.dirname(self.log_path) or ".", exist_ok=True)
+            with open(self.log_path, "a") as f:
+                f.write(json.dumps({"type": "feed_stopped", "ts": int(time.time() * 1000)}) + "\n")
+
+
 def to_event(vehicle, event_ts, now_ms):
     return {
         "event_id": make_vehicle_event_id("fake", vehicle["vehicle_id"], event_ts),
@@ -144,7 +194,8 @@ def to_event(vehicle, event_ts, now_ms):
         "lon": round(vehicle["lon"], 6),
         "bearing": float(vehicle["heading"]),
         "speed_mps": None if random.random() < 0.5 else round(vehicle["speed"], 2),
-        "current_status": "STOPPED_AT" if vehicle["speed"] == 0 else random.choice(STATUSES[::2]),
+        "current_status": ("IN_TRANSIT_TO" if vehicle.get("stalled")      # stuck between stops
+                           else "STOPPED_AT" if vehicle["speed"] == 0 else random.choice(STATUSES[::2])),
         "stop_id": None,
     }
 
@@ -162,12 +213,18 @@ def main():
     p.add_argument("--bunch-length", type=int, default=4, help="batches each planted event lasts")
     p.add_argument("--bunch-gap", type=float, default=60.0, help="meters between the planted buses")
     p.add_argument("--planted-log", default="data/planted_bunching.jsonl")
+    p.add_argument("--stall-every", type=int, default=0,
+                   help="plant a stalled bus every N batches (0 = off)")
+    p.add_argument("--stall-length", type=int, default=20, help="batches each planted stall lasts")
+    p.add_argument("--stall-log", default="data/planted_stalls.jsonl")
     args = p.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
     vehicles = make_vehicles(args.vehicles)
     planter = BunchingPlanter(vehicles, args.bunch_every, args.bunch_length,
                               args.bunch_gap, args.planted_log)
+    staller = StallPlanter(vehicles, args.stall_every, args.stall_length, args.stall_log,
+                           busy=lambda: (planter.active["a"], planter.active["b"]) if planter.active else ())
     held_back = []          # late events waiting to be released
     sent = 0
     batch = 0
@@ -178,6 +235,7 @@ def main():
             for v in vehicles:
                 step(v, args.interval)
             planter.before_batch(batch, now_ms)
+            staller.before_batch(batch, now_ms)
             for v in vehicles:
                 event_ts = now_ms - v["lag_ms"] - random.randint(0, 1000)  # feed lag: 2-19 s
                 event = to_event(v, event_ts, now_ms)
@@ -208,8 +266,10 @@ def main():
 
             sent += len(records)
             batch += 1
-            planting = " | planting bunching" if planter.active else ""
+            planting = (" | planting bunching" if planter.active else "") + \
+                       (" | planting stall" if staller.active else "")
             planter.after_batch(now_ms)
+            staller.after_batch(now_ms)
             print(f"batch {batch}: wrote {len(records)} events "
                   f"({len(ready)} late released) | total sent {sent}{planting}", flush=True)
             time.sleep(args.interval)
@@ -219,6 +279,9 @@ def main():
         # Record when the feed stopped: windows near the end can't close without newer data.
         planter.write({"type": "feed_stopped", "ts": int(time.time() * 1000)})
         print(f"Planted bunching events: {planter.planted} (logged to {args.planted_log})")
+    if args.stall_every > 0:
+        staller.stopped()
+        print(f"Planted stalls: {staller.planted} (logged to {args.stall_log})")
     print(f"Stopped. Total events sent: {sent}")
 
 

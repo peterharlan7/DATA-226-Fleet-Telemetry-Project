@@ -1,0 +1,17 @@
+{
+  "alerts": 1090,
+  "with_recording_data": 717,
+  "route_windows": 2669,
+  "context_s": 300,
+  "still_m": 50,
+  "coupled_m": 40,
+  "categories": {
+    "same_trip": 0,
+    "layover": 246,
+    "one_parked": 296,
+    "coupled": 2,
+    "same_stop": 38,
+    "moving": 135
+  },
+  "no_data": 373
+}

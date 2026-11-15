@@ -1,0 +1,16 @@
+{
+  "sent": 53955,
+  "duplicates": 0,
+  "late": 0,
+  "invalid_skipped": 0,
+  "shuffled_windows": 0,
+  "seconds": 21.99,
+  "events_per_sec": 2453.2,
+  "speed": 10.0,
+  "virtual_vehicles": 1,
+  "key": "vehicle_id",
+  "delivery": "at-least-once",
+  "dup_rate": 0.0,
+  "late_rate": 0.0,
+  "shuffle": 0
+}
