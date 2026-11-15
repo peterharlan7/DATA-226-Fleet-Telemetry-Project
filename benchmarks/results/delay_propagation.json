@@ -1,0 +1,24 @@
+{
+  "settings": {
+    "recording": "data/recording_24h.jsonl",
+    "late": 300,
+    "change": 60,
+    "next_within": 30,
+    "out": "benchmarks/results"
+  },
+  "trip_update_records": 824978,
+  "snapshots": 63325,
+  "trips": 691,
+  "within_trip": {
+    "grows": 393,
+    "shrinks": 14838,
+    "flat": 48094
+  },
+  "across_trips": {
+    "pairs": 10866,
+    "baseline_late_share": 0.1032,
+    "late_after_late_share": 0.3579,
+    "late_pairs": 1112,
+    "lift": 3.47
+  }
+}

@@ -44,6 +44,8 @@ def main():
 
     if os.path.isdir(args.alerts):
         alerts = pd.read_parquet(args.alerts)
+        if "is_bunching" in alerts.columns:          # refined detector also saves filtered-out pairs
+            alerts = alerts[alerts["is_bunching"]].reset_index(drop=True)
         alerts["start_ms"] = to_ms(alerts["window_start"])
         alerts["end_ms"] = to_ms(alerts["window_end"])
     else:

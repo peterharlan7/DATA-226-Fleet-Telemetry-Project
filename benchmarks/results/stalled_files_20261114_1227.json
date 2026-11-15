@@ -1,0 +1,49 @@
+{
+  "settings": {
+    "stall_minutes": 1.0,
+    "still_m": 50,
+    "min_reports": 3
+  },
+  "vehicle_windows": 160,
+  "stalls": [
+    {
+      "source": "fake",
+      "vehicle_id": "7006",
+      "route_id": "68",
+      "trip_id": "T68-6",
+      "since_ts": 1794687585014,
+      "last_ts": 1794687659991,
+      "lat": 37.306901,
+      "lon": -121.87,
+      "status": "IN_TRANSIT_TO",
+      "stop_id": null,
+      "minutes": 1.2
+    },
+    {
+      "source": "fake",
+      "vehicle_id": "7014",
+      "route_id": "68",
+      "trip_id": "T68-14",
+      "since_ts": 1794687691713,
+      "last_ts": 1794687776632,
+      "lat": 37.336439,
+      "lon": -121.87,
+      "status": "IN_TRANSIT_TO",
+      "stop_id": null,
+      "minutes": 1.4
+    },
+    {
+      "source": "fake",
+      "vehicle_id": "7016",
+      "route_id": "22",
+      "trip_id": "T22-16",
+      "since_ts": 1794687812620,
+      "last_ts": 1794687898589,
+      "lat": 37.3352,
+      "lon": -121.814765,
+      "status": "IN_TRANSIT_TO",
+      "stop_id": null,
+      "minutes": 1.4
+    }
+  ]
+}
