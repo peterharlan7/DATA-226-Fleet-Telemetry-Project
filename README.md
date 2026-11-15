@@ -125,3 +125,4 @@ The producers need `VEHICLE_ID_SALT` in `.env` (ask Jason; it must be the same f
 
 Docker Compose also starts MongoDB (`mongo`, port 27017) for the raw-event store (B11). Its address is `MONGO_URI` in `.env`.
 Checks: `./producer_check.sh SC` (producer to Kafka), `python ingestion/check_real.py` (only real data, follows the schema), `./spark_check.sh` (Kafka to Spark to Parquet).
+Benchmark (B22): `python benchmarks/bench_pipeline.py` measures Kafka → Spark → Parquet throughput and latency and saves CSVs to `benchmarks/results/` (see [`benchmarks/README.md`](benchmarks/README.md)).
