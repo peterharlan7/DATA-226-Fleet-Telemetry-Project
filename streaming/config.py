@@ -12,7 +12,9 @@ BUNCHING = {
     # Only compare two position reports taken within this many seconds of each
     # other, so a bus is not compared with where another bus was a minute ago.
     "max_time_gap_s": 60,
-    # Length of each event-time window (tumbling). Bigger = fewer, later alerts.
+    # The "current minute" each window reports on. With the refinement on (min_move_m > 0)
+    # windows are sliding: lookback_s + window_s long, moving forward window_s at a time.
+    # With min_move_m = 0 they are tumbling windows of window_s. Bigger = fewer, later alerts.
     "window_s": 60,
     # How long to wait for late reports before closing a window (watermark).
     # Bigger = fewer late reports missed, but alerts arrive later.

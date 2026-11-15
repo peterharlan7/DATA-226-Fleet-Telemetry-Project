@@ -18,6 +18,10 @@ How it works:
   4. A stall that continues is reported once (when it starts) and its duration is
      tracked; the final report lists every stall and how long it lasted.
 
+Limitation: the stall tracker lives in driver memory and is NOT saved in the Spark
+checkpoint. After a restart with the same --checkpoint, a stall already in progress
+is reported again as new, and the final report lists only stalls since the restart.
+
 Run from the repo root (start it before the feed):
     python streaming/detect_stalled.py
     python streaming/detect_stalled.py --source kafka --bootstrap localhost:29092

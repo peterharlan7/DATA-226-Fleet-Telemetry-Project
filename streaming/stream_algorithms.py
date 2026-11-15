@@ -10,6 +10,12 @@ To show how good the approximations are, the job ALSO keeps the exact answers
 (a set of every event_id and every vehicle). That exact check is for evaluation
 only: it uses far more memory, which is exactly what the streaming versions avoid.
 
+Limitation: the Bloom filter, reservoir and Flajolet-Martin state live in driver
+memory and are NOT saved in the Spark checkpoint. Restarting with the same
+--checkpoint resumes the stream where it stopped but starts every algorithm empty,
+so duplicates that span a restart are missed and the report covers only events
+since the restart. Use a fresh --checkpoint for a complete run.
+
 Run from the repo root:
     python streaming/stream_algorithms.py                                   # fake feed folder
     python streaming/stream_algorithms.py --source kafka --bootstrap localhost:29092
