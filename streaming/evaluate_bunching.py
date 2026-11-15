@@ -82,7 +82,7 @@ def main():
           f"|  other close pairs: {other}")
     if other:
         print("  Other close pairs may be real (random) bunching in the fake data; "
-              "the exact ground-truth scan (B18) decides which are correct.")
+              "streaming/ground_truth.py + compare_ground_truth.py (B18) decide which are correct.")
 
 
 if __name__ == "__main__":
