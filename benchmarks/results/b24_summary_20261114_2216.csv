@@ -1,0 +1,5 @@
+fault,delivery,trials,actual_downtime_s_mean,actual_downtime_s_min,actual_downtime_s_max,component_ready_s_mean,component_ready_s_min,component_ready_s_max,resume_s_mean,resume_s_min,resume_s_max,recovery_s_mean,recovery_s_min,recovery_s_max,max_lag_s_mean,max_lag_s_min,max_lag_s_max,events_acked_total,lost_end_to_end_total,lost_acked_total,kafka_duplicates_total,parquet_duplicates_total,raw_duplicates_total,orphan_rows_total,spark_crashes_total,trials_unrecovered
+kafka,at-most-once,3,10.36,10.33,10.37,15.34,15.03,15.51,26.55,26.02,27.14,28.21,27.94,28.47,27.68,27.21,28.27,149996,32,32,0,0,0,0,0,0
+kafka,at-least-once,3,10.32,10.29,10.35,15.17,14.94,15.36,26.06,25.2,26.61,27.24,27.11,27.42,26.57,26.02,26.87,149992,0,0,1,1,1,0,0,0
+kafka,exactly-once,3,10.32,10.31,10.34,15.41,14.99,16.23,25.86,25.3,26.52,27.94,26.45,29.14,27.34,27.12,27.53,149967,0,0,0,0,0,0,0,0
+spark,at-least-once,5,5.01,5.01,5.02,4.12,3.65,4.84,9.82,8.92,11.22,11.82,10.98,12.78,10.8,10.19,11.43,249994,0,0,0,0,0,0,0,0
