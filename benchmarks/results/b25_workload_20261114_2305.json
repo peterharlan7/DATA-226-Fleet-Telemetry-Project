@@ -1,0 +1,32 @@
+{
+  "stamp": "20261114_2305",
+  "seed": 25,
+  "vehicles": 40,
+  "interval_s": 10,
+  "hours": 2.0,
+  "late_fraction": 0.1,
+  "records": 28662,
+  "late_records": 2788,
+  "planted_events": 71,
+  "bunch_every": 10,
+  "bunch_length": 6,
+  "watermark_s": 30,
+  "max_offsets_per_batch": 160,
+  "partitions": 3,
+  "crash_at_fraction": 0.5,
+  "detector_settings": {
+    "max_distance_m": 200,
+    "max_time_gap_s": 60,
+    "window_s": 60,
+    "watermark_s": 30,
+    "lookback_s": 300,
+    "min_move_m": 50,
+    "min_history_s": 30,
+    "tandem_m": 40
+  },
+  "exact_alerts": {
+    "60": 821,
+    "300": 326,
+    "600": 234
+  }
+}
