@@ -22,7 +22,7 @@ GTFS-realtime feeds (511 / BART / VTA)
         ▼
    Apache Kafka  ──►  Spark Structured Streaming (streaming/)
                           │  windowed features, detectors, Bloom filter dedup
-                          ├──►  Raw-event store: MongoDB
+                          ├──►  Operational store: MongoDB (latest position per vehicle, alerts)
                           ├──►  Warehouse: ClickHouse or DuckDB (alerts, summaries)
                           └──►  Parquet archive (data/, not committed)
 ```
@@ -123,5 +123,52 @@ The producers need `VEHICLE_ID_SALT` in `.env` (ask Jason; it must be the same f
 
 **Live dashboard: [http://localhost:8000](http://localhost:8000)** (real Kafka data, updates every 2 seconds). Start it with `./demo.sh`, or run `python dashboard/viz_web.py` after the producers are running. A screenshot of a real run is in `docs/dashboard.png`.
 
-Docker Compose also starts MongoDB (`mongo`, port 27017) for the raw-event store (B11). Its address is `MONGO_URI` in `.env`.
+Docker Compose also starts MongoDB (`mongo`, port 27017, data kept in the `mongo-data` volume). Its address is `MONGO_URI` in `.env`.
+
+## MongoDB: latest positions and alerts (B11)
+
+MongoDB is the **operational store**: what is true right now. Raw events are **not** copied into it; the Parquet archive (`data/raw/vehicle_events`) stays the history for scans and analysis. All the code is in [`storage/mongo_sink.py`](storage/mongo_sink.py).
+
+| Collection | One document per | Written by | Indexes |
+| --- | --- | --- | --- |
+| `latest_positions` | vehicle, keyed by (`source`, `vehicle_id`) | `stream_to_parquet.py --mongo` | unique (`source`, `vehicle_id`); 2dsphere on `location` |
+| `alerts` | detector alert: `type`, `source`, `route_id`, `direction_id`, `window_start`, `window_end`, `vehicles`, `distance_m`, `detected_at` | `detect_bunching.py --mongo` | (`route_id`, `window_start`); `detected_at` |
+
+- A position replaces the stored one **only if its `event_ts` is newer**, so late or replayed reports never move a vehicle backwards.
+- Each alert has a deterministic `_id`, so a micro-batch that Spark re-runs after a crash does not store an alert twice.
+- Times are stored as UTC dates. Extra detector columns (e.g. `time_gap_s`) go under `details`.
+
+```
+docker compose up -d mongo
+python streaming/stream_to_parquet.py --source kafka --mongo   # Parquet archive + latest_positions
+python streaming/detect_bunching.py --source kafka --mongo     # Parquet alerts + MongoDB alerts
+python storage/mongo_sink.py                                   # counts, newest alerts, latest vehicles
+```
+
+Tests: `pytest storage/` (the MongoDB part is skipped when MongoDB is not running).
 Checks: `./producer_check.sh SC` (producer to Kafka), `python ingestion/check_real.py` (only real data, follows the schema), `./spark_check.sh` (Kafka to Spark to Parquet).
+
+## Ground truth: how accurate are the streaming detectors? (B18)
+
+The streaming detectors close each window after a short watermark, so reports that arrive late are dropped. [`streaming/ground_truth.py`](streaming/ground_truth.py) is a **batch** job that reads the whole Parquet archive and applies the **same rules with the same code** (the detectors' own window and rule functions, settings from `streaming/config.py`) but with no watermark. Its output is the exact answer. [`streaming/compare_ground_truth.py`](streaming/compare_ground_truth.py) scores the streaming alerts against it.
+
+| Detector | Ground-truth table | Matched on |
+| --- | --- | --- |
+| Bus bunching (B12) | `data/ground_truth/bunching` (every close pair, with `category` / `is_bunching`) | source, route, direction, minute, pair of buses |
+| Stalled vehicle (B16) | `data/ground_truth/stalled` (one row per stall, full duration) | source, vehicle, overlapping time |
+| Delay propagation (B15) | `data/ground_truth/delay_propagation` (knock-on delays: a late train followed by a late train at the same station) | source, route, station, pair of trains |
+
+```
+python streaming/ground_truth.py                 # archive -> data/ground_truth/*, benchmarks/results/ground_truth_summary.json
+python streaming/compare_ground_truth.py         # precision / recall per detector -> benchmarks/results/ground_truth_comparison.json
+```
+
+- Use the same settings for both (e.g. `--stall-minutes 1` on the detector and on `ground_truth.py`).
+- Ground-truth alerts in the last watermark before the archive ends are **pending** (the stream could not have closed them yet) and are left out of recall. `--since` / `--until` limit scoring to the time the streaming job ran.
+- For bunching misses and false alarms, the comparison prints why: the stream labelled the pair differently (e.g. `no_history` after late look-back reports were dropped), or never saw the pair close.
+- Trip updates are not in the Parquet archive yet, so delay-propagation ground truth reads `data/raw/trip_updates` if it exists, else the JSON-lines recording. There is no streaming delay detector yet, so that part is ground truth only until one writes to `data/alerts/delay_propagation`.
+
+Tests: `pytest streaming/test_ground_truth.py`.
+
+Benchmark (B22): `python benchmarks/bench_pipeline.py` measures Kafka → Spark → Parquet throughput and latency and saves CSVs to `benchmarks/results/` (see [`benchmarks/README.md`](benchmarks/README.md)).
+

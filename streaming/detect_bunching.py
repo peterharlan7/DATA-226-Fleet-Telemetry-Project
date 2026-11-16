@@ -23,6 +23,7 @@ How it works:
      Only tandem / same_stop / moving count as bunching (is_bunching = true).
      --min-move 0 turns the refinement off (the original raw detector).
   5. Write every close pair to Parquet (data/alerts/bunching) and print the bunching ones.
+     With --mongo, also insert the bunching ones into the MongoDB alerts collection (B11).
 
 Run from the repo root (start it before the feed):
     python streaming/detect_bunching.py
@@ -202,7 +203,7 @@ def progress_record(p):
     """The parts of a StreamingQueryProgress (a dict) that B25 needs, as one JSON-able dict."""
     if not isinstance(p, dict):                     # PySpark 4 returns progress objects
         p = json.loads(p.json)
-    ops =p.get("stateOperators") or [{}]
+    ops = p.get("stateOperators") or [{}]
     src = (p.get("sources") or [{}])[0]
     return {"batch_id": p["batchId"], "timestamp": p["timestamp"],
             "input_rows": p.get("numInputRows", 0),
@@ -214,29 +215,37 @@ def progress_record(p):
             "end_offset": src.get("endOffset")}
 
 
-def build_query(spark, args):
-    from pyspark.sql.functions import (col, collect_list, count, current_timestamp,
-                                       explode, lit, struct, timestamp_millis, udf, window)
-    from pyspark.sql.types import (ArrayType, BooleanType, DoubleType, StringType,
-                                   StructField, StructType)
+def route_windows(events, args):
+    """Group reports into sliding windows per (source, route, direction).
 
-    schema = spark_schema(VEHICLE_EVENT_FIELDS)
-    events = (read_stream(spark, args, schema)
-              .where(col("event_id").isNotNull()
-                     & col("route_id").isNotNull()
-                     & col("direction_id").isNotNull())
-              .withColumn("event_time", timestamp_millis(col("event_ts")))
-              .withWatermark("event_time", f"{args.watermark} seconds"))
+    Shared by the streaming job and the offline ground-truth scan (B18), so both
+    use exactly the same windows. `events` may be a streaming or a batch DataFrame.
+    """
+    from pyspark.sql.functions import col, collect_list, count, struct, timestamp_millis, window
+
+    events = (events.where(col("event_id").isNotNull()
+                           & col("route_id").isNotNull()
+                           & col("direction_id").isNotNull())
+              .withColumn("event_time", timestamp_millis(col("event_ts"))))
+    if events.isStreaming:
+        events = events.withWatermark("event_time", f"{args.watermark} seconds")
 
     # Sliding window: (look-back + current minute) long, moving forward one minute at a time.
     # Every minute is the "current minute" of exactly one window.
     span = args.lookback + args.window if args.min_move > 0 else args.window
-    windows = (events
-               .groupBy(window(col("event_time"), f"{span} seconds", f"{args.window} seconds"),
-                        "source", "route_id", "direction_id")
-               .agg(collect_list(struct("vehicle_id", "event_ts", "lat", "lon", "trip_id",
-                                        "current_status", "stop_id")).alias("reports"),
-                    count("*").alias("n_reports")))
+    return (events
+            .groupBy(window(col("event_time"), f"{span} seconds", f"{args.window} seconds"),
+                     "source", "route_id", "direction_id")
+            .agg(collect_list(struct("vehicle_id", "event_ts", "lat", "lon", "trip_id",
+                                     "current_status", "stop_id")).alias("reports"),
+                 count("*").alias("n_reports")))
+
+
+def window_pairs(windows, args):
+    """Apply the bunching rule to closed windows: one row per close pair (shared with B18)."""
+    from pyspark.sql.functions import col, explode, lit, timestamp_millis, udf
+    from pyspark.sql.types import (ArrayType, BooleanType, DoubleType, StringType,
+                                   StructField, StructType)
 
     s, d, b = StringType(), DoubleType(), BooleanType()
     pair_type = ArrayType(StructType([StructField(n, t) for n, t in [
@@ -249,18 +258,26 @@ def build_query(spark, args):
     find_pairs = udf(lambda reports, end_ms: bunching_pairs(
         [r.asDict() for r in reports], end_ms - win_ms, max_d, max_gap, min_move, min_hist, tandem), pair_type)
 
+    end_ms = col("window.end").cast("long") * 1000
+    return (windows
+            .withColumn("pair", explode(find_pairs(col("reports"), end_ms)))
+            .select("source", "route_id", "direction_id",
+                    # Report the current minute, not the whole look-back window.
+                    timestamp_millis(end_ms - lit(win_ms)).alias("window_start"),
+                    col("window.end").alias("window_end"),
+                    "pair.*"))
+
+
+def build_query(spark, args):
+    from pyspark.sql.functions import current_timestamp
+
+    windows = route_windows(read_stream(spark, args, spark_schema(VEHICLE_EVENT_FIELDS)), args)
+
     stats = {"windows": 0, "alerts": 0, "close_pairs": 0, "categories": {}}
 
     def handle_batch(batch_df, batch_id):
         """Runs once per micro-batch on the windows that just closed."""
-        end_ms = col("window.end").cast("long") * 1000
-        alerts = (batch_df
-                  .withColumn("pair", explode(find_pairs(col("reports"), end_ms)))
-                  .select("source", "route_id", "direction_id",
-                          # Report the current minute, not the whole look-back window.
-                          timestamp_millis(end_ms - lit(win_ms)).alias("window_start"),
-                          col("window.end").alias("window_end"),
-                          "pair.*")
+        alerts = (window_pairs(batch_df, args)
                   .withColumn("detected_at", current_timestamp())
                   .persist())
         n_windows = batch_df.count()
@@ -272,6 +289,14 @@ def build_query(spark, args):
             crash_now(batch_id)
 
         bunched = [r for r in rows if r["is_bunching"]]
+        if bunched and args.mongo:
+            # Only real bunching goes to the operational alerts collection; filtered-out
+            # close pairs (layover, one_parked, no_history) stay in Parquet for analysis.
+            # Aliased: a bare `import write_alerts` here would shadow the Parquet
+            # write_alerts above for the whole function (UnboundLocalError).
+            from storage.mongo_sink import write_alerts as mongo_write_alerts
+            new = mongo_write_alerts([r.asDict() for r in bunched], alert_type="bunching")
+            print(f"  mongo alerts: {new} new of {len(bunched)}", flush=True)
         stats["windows"] += n_windows
         stats["close_pairs"] += len(rows)
         stats["alerts"] += len(bunched)
@@ -321,6 +346,8 @@ def main():
     p.add_argument("--quiet", action="store_true",
                    help="don't print every alert; show event-time progress instead (long replays)")
     p.add_argument("--summary", default=None, help="write category counts to this JSON file at stop")
+    p.add_argument("--mongo", action="store_true",
+                   help="also write each alert to the MongoDB alerts collection (B11, MONGO_URI)")
     # Experiment options (B25 design comparison). Defaults keep the normal behaviour.
     p.add_argument("--sink-mode", choices=SINK_MODES, default="append",
                    help="append = at-least-once alert writes; idempotent = overwrite per batch_id (exactly-once)")
