@@ -175,7 +175,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--source", choices=["files", "kafka"], default="files")
     p.add_argument("--input", default="data/stream_in", help="folder to watch (files source)")
-    p.add_argument("--bootstrap", default=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
+    p.add_argument("--bootstrap", default=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092"))
     p.add_argument("--topic", default=os.getenv("KAFKA_TOPIC_POSITIONS", TOPIC_VEHICLE_POSITIONS))
     p.add_argument("--output", default=OUTPUT_PATH)
     p.add_argument("--checkpoint", default=CHECKPOINT_PATH)
