@@ -19,7 +19,6 @@ import argparse
 import glob
 import json
 import os
-import random
 import sys
 import textwrap
 
@@ -61,7 +60,7 @@ def finish(ax, title, handles=None, labels=None, ncol=None):
     ax.set_title(textwrap.fill(title, 70), pad=30 if handles else 8)
 
 
-def save(fig, name, source, bottom=0.0):
+def save(fig, name, source):
     fig.tight_layout()
     fig.text(0.01, -0.01, f"Source: {source}", fontsize=8, color=INK2, va="top")
     path = os.path.join(OUT, name)
@@ -351,7 +350,8 @@ def fig_fairness():
     med = df.no_history.median() * 100
     ax.axhline(med, color=INK2, linewidth=1, linestyle=":")
     ax.text(len(df) - 1, med + 1, f"median {med:.0f}%", ha="right", fontsize=9, color=INK2)
-    finish(ax, "Fairness: detection reliability varies 3.5x across routes",
+    p10, p90 = df.no_history.quantile([0.1, 0.9])
+    finish(ax, f"Fairness: detection reliability varies {p90 / p10:.1f}x across routes (p90 vs p10)",
            [plt.Rectangle((0, 0), 1, 1, color=c) for c in AGENCY.values()], list(AGENCY_NAME.values()))
     save(fig, "b28_fairness_by_route.png", "streaming/analyze_fairness.py (B27), 24 h replay")
 
@@ -372,7 +372,6 @@ def main():
     if not args.skip_sweeps and glob.glob(os.path.join(args.replay, "*.json")):
         print("Sweeps on the 24 h replay:")
         ids, vehicles = load_replay(args.replay)
-        random.seed(7)
         sweeps = {"bloom": bloom_sweep(ids), "fm": fm_sweep(vehicles)}
         with open(sweeps_path, "w") as f:
             json.dump(sweeps, f, indent=2)
