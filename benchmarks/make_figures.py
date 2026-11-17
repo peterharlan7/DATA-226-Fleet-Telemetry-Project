@@ -172,6 +172,15 @@ def fig_fm(rows):
         ax.plot(g.memory_bytes, g.mean_error_pct, "-o", color=c)
         handles.append(plt.Line2D([], [], color=c, marker="o"))
         labels.append(f"{AGENCY_NAME.get(src, src)}: {g['true'].iloc[0]} vehicles")
+    # Label every point with its error: the higher line's value above its point, the lower one's below,
+    # so the two agencies' labels never collide where the lines are close.
+    for mem, g in df.groupby("memory_bytes"):
+        g = g.sort_values("mean_error_pct")
+        for rank, (_, r) in enumerate(g.iterrows()):
+            above = rank == len(g) - 1
+            ax.annotate(f"{r.mean_error_pct:.1f}%", (mem, r.mean_error_pct), xytext=(0, 11 if above else -13),
+                        textcoords="offset points", ha="center", va="bottom" if above else "top",
+                        fontsize=13, fontweight="bold", color=AGENCY.get(r.source, AQUA))
     last = df[df.memory_bytes == df.memory_bytes.max()]
     lo, hi = last.mean_error_pct.min(), last.mean_error_pct.max()
     y = header(fig, f"Flajolet-Martin counts about {total:,} vehicles within {lo:.0f}-{hi:.0f}% using 1 KB",
