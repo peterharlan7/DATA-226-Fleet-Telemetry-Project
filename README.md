@@ -27,7 +27,9 @@ GTFS-realtime feeds (511 / BART / VTA)
                           └──►  Parquet archive (data/, not committed)
 ```
 
-A full flow diagram will be added in `docs/`.
+Full flow schematic (B29), for the report and slides: [`docs/flow_diagram.svg`](docs/flow_diagram.svg) (vector) and [`docs/flow_diagram.png`](docs/flow_diagram.png) (3200×1952). Mermaid version (renders on GitHub): [`docs/flow_diagram.md`](docs/flow_diagram.md).
+
+![Pipeline flow diagram](docs/flow_diagram.png)
 
 ## Repository layout
 
