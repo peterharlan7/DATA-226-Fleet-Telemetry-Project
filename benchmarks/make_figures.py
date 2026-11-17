@@ -10,7 +10,7 @@ Every other figure only reads saved results. A figure whose input is missing is
 skipped with a note, so this can be rerun as more results land.
 
 Run from the repo root:
-    python benchmarks/make_figures.py                 # everything (sweeps take ~2 min)
+    python benchmarks/make_figures.py                 # everything (sweeps take ~3-5 min)
     python benchmarks/make_figures.py --skip-sweeps   # only the saved results
 Writes report/figures/*.png and benchmarks/results/b28_sweeps.json (sweep numbers).
 """
@@ -31,6 +31,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from algorithms.stream_algos import BloomFilter, FlajoletMartin  # noqa: E402
 
 RES = "benchmarks/results"
+COLD_JVM_RUN = "20261114_200826_r40000_t1_0"
+AV_PARQUET = "data/av2/av2_20_scenarios.parquet"
 OUT = "report/figures"
 
 # Validated reference palette (light mode); categorical slots in fixed order.
@@ -69,6 +71,11 @@ def save(fig, name, source):
     made.append(path)
 
 
+def load_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
 def latest(pattern):
     files = sorted(glob.glob(os.path.join(RES, pattern)))
     return files[-1] if files else None
@@ -96,7 +103,13 @@ def load_replay(folder, limit=None):
     return ids, vehicles
 
 
-def bloom_sweep(ids, probes=50_000):
+def exact_set_bytes(items):
+    """Measured memory of an exact Python set of the IDs: the set itself plus every string in it."""
+    st = set(items)
+    return sys.getsizeof(st) + sum(sys.getsizeof(x) for x in st)
+
+
+def bloom_sweep(ids, probes=1_000_000):
     distinct = list(dict.fromkeys(ids))
     n = len(distinct)
     fake = [f"probe:{i}:not-an-event" for i in range(probes)]
@@ -105,14 +118,19 @@ def bloom_sweep(ids, probes=50_000):
         bf = BloomFilter(n, p)
         for x in distinct:
             bf.add(x)
-        fp = sum(x in bf for x in fake) / probes
+        hits = sum(x in bf for x in fake)
+        fp = hits / probes
         rows.append({"target_fp": p, "memory_bytes": bf.memory_bytes(), "hashes_k": bf.k,
-                     "bits_per_item": round(bf.m / n, 2), "measured_fp": fp})
-        print(f"  Bloom target {p:.2%}: measured {fp:.3%}, {bf.memory_bytes() / 1e6:.2f} MB")
-    return {"distinct_ids": n, "exact_set_bytes_est": n * 120, "rows": rows}
+                     "bits_per_item": round(bf.m / n, 2), "measured_fp": fp,
+                     "false_positive_hits": hits, "expected_hits": round(p * probes)})
+        print(f"  Bloom target {p:.2%}: measured {fp:.4%} ({hits:,} of {probes:,} probes), "
+              f"{bf.memory_bytes() / 1e6:.2f} MB")
+    exact = exact_set_bytes(distinct)
+    print(f"  Exact Python set of the same IDs (measured): {exact / 1e6:.1f} MB")
+    return {"distinct_ids": n, "probes": probes, "exact_set_bytes_measured": exact, "rows": rows}
 
 
-def fm_sweep(vehicles, seeds=5):
+def fm_sweep(vehicles, seeds=20):
     rows = []
     for nh in (8, 16, 32, 64, 128):
         for src, vs in sorted(vehicles.items()):
@@ -123,7 +141,7 @@ def fm_sweep(vehicles, seeds=5):
                 for v in vs:
                     fm.add(v)
                 errs.append(abs(fm.estimate() - len(vs)) / len(vs) * 100)
-            rows.append({"source": src, "num_hashes": nh, "memory_bytes": nh * 8, "true": len(vs),
+            rows.append({"source": src, "num_hashes": nh, "memory_bytes": nh * 8, "true": len(vs), "seeds": seeds,
                          "mean_error_pct": round(sum(errs) / len(errs), 2),
                          "max_error_pct": round(max(errs), 2)})
             print(f"  FM {src} {nh:>3} hashes ({nh * 8} B): mean error {rows[-1]['mean_error_pct']}%")
@@ -134,17 +152,26 @@ def fig_bloom(sw):
     df = pd.DataFrame(sw["rows"])
     fig, ax = plt.subplots(figsize=(8, 4.8))
     ax.plot(df.memory_bytes / 1e6, df.measured_fp * 100, "-o", color=BLUE, label="measured")
+    if "false_positive_hits" in df:                      # too few hits to trust the rate: hollow marker
+        few = df[df.false_positive_hits < 20]
+        if len(few):
+            ax.scatter(few.memory_bytes / 1e6, few.measured_fp * 100, facecolor=SURFACE, edgecolor=BLUE,
+                       linewidth=2, s=60, zorder=4, label="fewer than 20 false-positive hits")
     ax.plot(df.memory_bytes / 1e6, df.target_fp * 100, "--", color=MUTED, linewidth=1.5, label="target")
     ax.set_xscale("log"); ax.set_yscale("log")
     for _, r in df.iterrows():
         ax.annotate(f"{r.bits_per_item:.0f} bits/ID", (r.memory_bytes / 1e6, r.measured_fp * 100),
                     textcoords="offset points", xytext=(6, 4), fontsize=8, color=INK2)
-    exact = sw["exact_set_bytes_est"] / 1e6
+    if "exact_set_bytes_measured" in sw:
+        exact, how = sw["exact_set_bytes_measured"] / 1e6, "measured"
+    else:                                                # older sweep file: 120 bytes per ID guess
+        exact, how = sw["exact_set_bytes_est"] / 1e6, "estimated"
     ax.axvline(exact, color=ORANGE, linewidth=1.5)
-    ax.text(exact, ax.get_ylim()[1], f" exact set ≈ {exact:.0f} MB\n (0% false positives)", va="top",
-            fontsize=9, color=INK2)
+    ax.text(exact, ax.get_ylim()[1], f" exact Python set\n {exact:.0f} MB ({how})\n 0% false positives",
+            va="top", fontsize=9, color=INK2)
     ax.set_xlabel("Memory (MB, log scale)"); ax.set_ylabel("False-positive rate (%, log scale)")
-    finish(ax, f"Bloom filter: accuracy vs memory ({sw['distinct_ids']:,} real event IDs, 24 h)")
+    probes = f", {sw['probes']:,} probes" if "probes" in sw else ""
+    finish(ax, f"Bloom filter: accuracy vs memory ({sw['distinct_ids']:,} real event IDs{probes})")
     save(fig, "b28_bloom_fp_vs_memory.png", "24 h recording, Nov 13-14; algorithms/stream_algos.py")
 
 
@@ -157,7 +184,8 @@ def fig_fm(rows):
     ax.set_xscale("log", base=2)
     ax.set_xticks(df.memory_bytes.unique()); ax.set_xticklabels([f"{b} B" for b in df.memory_bytes.unique()])
     ax.set_xlabel("Memory per agency (bytes; 8 per hash function)"); ax.set_ylabel("Mean error (%)")
-    finish(ax, "Flajolet-Martin: distinct-vehicle error vs memory (5 seeds)")
+    seeds = int(df["seeds"].iloc[0]) if "seeds" in df else 5
+    finish(ax, f"Flajolet-Martin: distinct-vehicle error vs memory (mean of {seeds} seeds)")
     save(fig, "b28_fm_error_vs_memory.png", "24 h recording; error = |estimate - true| / true")
 
 
@@ -187,7 +215,7 @@ def fig_bunching():
     path = os.path.join(RES, "bunching_replay_summary.json")
     if not need(path):
         return skipped.append("bunching (bunching_replay_summary.json)")
-    cats = json.load(open(path))["categories"]
+    cats = load_json(path)["categories"]
     order = [("layover", "both parked (layover)", False), ("one_parked", "one bus parked", False),
              ("no_history", "too little history", False), ("moving", "both moving", True),
              ("same_stop", "same stop", True), ("tandem", "tandem (<40 m for 5 min)", True)]
@@ -213,8 +241,8 @@ def fig_throughput():
     if not files:
         return skipped.append("B22 throughput (b22_runs_*.csv)")
     df = pd.concat([pd.read_csv(f).assign(file=os.path.basename(f)) for f in files])
-    # The 20:08 sweep had a cold JVM on its first run (benchmarks/README.md); its 40k / 1 s run was repeated at 20:13.
-    df = df[~((df.file.str.contains("2008")) & (df.rate_target == 40000) & (df.trigger_s == 1))]
+    # The 20:08 sweep's first run had a cold JVM (benchmarks/README.md); it was repeated at 20:13.
+    df = df[df.run_id != COLD_JVM_RUN]
     fig, ax = plt.subplots(figsize=(8, 4.8))
     for trig, color in ((1, BLUE), (5, ORANGE)):
         g = df[df.trigger_s == trig].sort_values("rate_target")
@@ -266,12 +294,17 @@ def fig_windows():
     panels = [(axes[0], idem.late_drop_pct, "Late reports dropped (%)"),
               (axes[1], idem.alert_delay_s_median, "Median alert delay (s)"),
               (axes[2], idem.recall_exact * 100, "Recall vs exact scan (%)")]
-    for ax, vals, title in panels:
+    for ax, vals, title in panels[:2]:
         ax.bar(mins, vals, color=BLUE, width=0.55, edgecolor=SURFACE, linewidth=2)
         for i, v in enumerate(vals):
             ax.text(i, v, f"{v:.1f}" if v < 100 else f"{v:.0f}", ha="center", va="bottom", fontsize=9, color=INK2)
         ax.set_title(title, fontsize=11); ax.grid(axis="x", visible=False)
-    axes[2].set_ylim(90, 100)
+    ax, vals, title = panels[2]                     # recall: points, because the axis is zoomed
+    ax.plot(list(mins), list(vals), "-o", color=BLUE)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 0.15, f"{v:.1f}", ha="center", va="bottom", fontsize=9, color=INK2)
+    ax.set_ylim(96, 100); ax.set_title(title + "\naxis zoomed to 96-100%", fontsize=11)
+    ax.margins(x=0.25); ax.grid(axis="x", visible=False)
     dup = ", ".join(f"{int(w // 60)} min: {d}" for w, d in zip(app.window_s, app.duplicate_alert_rows))
     fig.suptitle("Window size trade-off (bunching detector, crash mid-run)", x=0.01, ha="left",
                  fontweight="bold", fontsize=13)
@@ -285,12 +318,20 @@ def fig_av():
     algo = os.path.join(RES, "stream_algorithms_24h.json")
     if not need(*reports.values(), algo):
         return skipped.append("AV vs transit (av_replay_*.json)")
-    transit = json.load(open(algo))["events"] / 86_400
+    transit = load_json(algo)["events"] / 86_400
+    if os.path.exists(AV_PARQUET):                   # real-time rate = readings / span of the replay
+        av = pd.read_parquet(AV_PARQUET, columns=["scenario_id", "track_id", "t_sec"])
+        n_av = av.groupby(["scenario_id", "track_id"]).ngroups
+        realtime, rt_note = len(av) / (av.t_sec.max() - av.t_sec.min()), "from the data"
+    else:                                            # fallback: 10x run / 10 (assumes it was not throttled)
+        n_av, realtime = None, load_json(reports["speed10"])["events_per_sec"] / 10
+        rt_note = "10x rate / 10"
+    av_label = f"{n_av:,} AVs" if n_av else "AV fleet"
     rates = [("Muni + VTA buses,\nlive average", transit, MUTED),
-             ("958 AVs, real time\n(10 Hz)", json.load(open(reports["speed10"]))["events_per_sec"] / 10, BLUE),
-             ("AV replay 10x", json.load(open(reports["speed10"]))["events_per_sec"], BLUE),
-             ("AV replay 100x", json.load(open(reports["speed100"]))["events_per_sec"], BLUE),
-             ("AV 100x, 10 copies\n(producer ceiling)", json.load(open(reports["speed100_x10"]))["events_per_sec"], BLUE)]
+             (f"{av_label}, real time\n(10 Hz, {rt_note})", realtime, BLUE),
+             ("AV replay 10x", load_json(reports["speed10"])["events_per_sec"], BLUE),
+             ("AV replay 100x", load_json(reports["speed100"])["events_per_sec"], BLUE),
+             ("AV 100x, 10 copies\n(producer ceiling)", load_json(reports["speed100_x10"])["events_per_sec"], BLUE)]
     fig, ax = plt.subplots(figsize=(8, 4.8))
     labels = [r[0] for r in rates][::-1]
     vals = [r[1] for r in rates][::-1]
@@ -322,7 +363,7 @@ def fig_delay():
     finish(ax, "BART: share of late arrivals by hour (one day, Nov 13-14)")
     prop = os.path.join(RES, "delay_propagation.json")
     if os.path.exists(prop):
-        a = json.load(open(prop))["across_trips"]
+        a = load_json(prop)["across_trips"]
         ax.text(0.99, 0.97, f"After a late train, the next is late {a['late_after_late_share']:.0%}\n"
                 f"vs {a['baseline_late_share']:.0%} overall ({a['lift']}x lift)", transform=ax.transAxes,
                 ha="right", va="top", fontsize=9, color=INK2, zorder=5,
@@ -339,8 +380,8 @@ def fig_fairness():
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
     ax.bar(df.index, df.no_history * 100, color=[AGENCY.get(s, AQUA) for s in df.source], width=0.8,
            edgecolor=SURFACE, linewidth=1)
-    worst = ", ".join(f"{AGENCY_NAME[r.source].split()[0]} {r.route_id} {r.no_history:.0%}" for r in df.head(3).itertuples())
-    best = ", ".join(f"{AGENCY_NAME[r.source].split()[0]} {r.route_id} {r.no_history:.0%}" for r in df.tail(2).itertuples())
+    worst = ", ".join(f"{AGENCY_NAME.get(r.source, r.source).split()[0]} {r.route_id} {r.no_history:.0%}" for r in df.head(3).itertuples())
+    best = ", ".join(f"{AGENCY_NAME.get(r.source, r.source).split()[0]} {r.route_id} {r.no_history:.0%}" for r in df.tail(2).itertuples())
     ax.text(0.99, 0.97, f"Least reliable: {worst}\nMost reliable: {best}", transform=ax.transAxes,
             ha="right", va="top", fontsize=8.5, color=INK2, zorder=5,
             bbox=dict(facecolor=SURFACE, edgecolor="none", pad=3))
@@ -363,18 +404,21 @@ def main():
     p.add_argument("--replay", default="data/replay_in")
     p.add_argument("--out", default=OUT)
     p.add_argument("--skip-sweeps", action="store_true")
+    p.add_argument("--probes", type=int, default=1_000_000, help="Bloom false-positive probes per size")
+    p.add_argument("--fm-seeds", type=int, default=20, help="Flajolet-Martin runs per point")
     args = p.parse_args()
     RES, OUT = args.results, args.out
     os.makedirs(OUT, exist_ok=True)
 
     sweeps_path = os.path.join(RES, "b28_sweeps.json")
-    sweeps = json.load(open(sweeps_path)) if os.path.exists(sweeps_path) else None
+    sweeps = load_json(sweeps_path) if os.path.exists(sweeps_path) else None
     if not args.skip_sweeps and glob.glob(os.path.join(args.replay, "*.json")):
         print("Sweeps on the 24 h replay:")
         ids, vehicles = load_replay(args.replay)
-        sweeps = {"bloom": bloom_sweep(ids), "fm": fm_sweep(vehicles)}
+        sweeps = {"bloom": bloom_sweep(ids, args.probes), "fm": fm_sweep(vehicles, args.fm_seeds)}
         with open(sweeps_path, "w") as f:
             json.dump(sweeps, f, indent=2)
+            f.write("\n")
     if sweeps:
         fig_bloom(sweeps["bloom"])
         fig_fm(sweeps["fm"])
