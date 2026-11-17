@@ -165,6 +165,56 @@ def _closest_pairs(reports, max_distance_m, max_time_gap_s):
     return pairs
 
 
+SINK_MODES = ("append", "idempotent")
+
+
+def batch_path(output, batch_id):
+    """Where the idempotent sink keeps one micro-batch's alerts: <output>/batch_id=<n>."""
+    return os.path.join(output, f"batch_id={batch_id}")
+
+
+def write_alerts(alerts, batch_id, output, sink_mode):
+    """Write one micro-batch's alerts (B25 compares the two modes).
+
+    append      add new files every time (at-least-once). foreachBatch is not covered by
+                Spark's exactly-once file sink: if the job dies after this write but before
+                Spark commits the batch, the restarted job runs the same batch again and
+                its alerts are written twice.
+    idempotent  overwrite <output>/batch_id=<n> (exactly-once). A replayed batch has the
+                same batch_id, the same input offsets and the same window state, so it
+                replaces its own earlier output instead of adding to it. Same idea as the
+                deterministic _id in the MongoDB alert sink (B11).
+    """
+    if sink_mode == "idempotent":
+        alerts.write.mode("overwrite").parquet(batch_path(output, batch_id))
+    else:
+        alerts.write.mode("append").parquet(output)
+
+
+def crash_now(batch_id):
+    """Fault injection (B25): SIGKILL this job (driver + JVM) right after a sink write,
+    before Spark can commit the batch: the at-least-once window. Only for a job started
+    in its own process group (the B25 harness does that)."""
+    print(f"CRASH injected after writing micro-batch {batch_id}", flush=True)
+    os.killpg(os.getpgrp(), signal.SIGKILL)
+
+
+def progress_record(p):
+    """The parts of a StreamingQueryProgress (a dict) that B25 needs, as one JSON-able dict."""
+    if not isinstance(p, dict):                     # PySpark 4 returns progress objects
+        p = json.loads(p.json)
+    ops = p.get("stateOperators") or [{}]
+    src = (p.get("sources") or [{}])[0]
+    return {"batch_id": p["batchId"], "timestamp": p["timestamp"],
+            "input_rows": p.get("numInputRows", 0),
+            "trigger_ms": p.get("durationMs", {}).get("triggerExecution"),
+            "watermark": p.get("eventTime", {}).get("watermark"),
+            "state_rows": ops[0].get("numRowsTotal"),
+            "state_bytes": ops[0].get("memoryUsedBytes"),
+            "dropped_by_watermark": ops[0].get("numRowsDroppedByWatermark", 0),
+            "end_offset": src.get("endOffset")}
+
+
 def route_windows(events, args):
     """Group reports into sliding windows per (source, route, direction).
 
@@ -233,15 +283,19 @@ def build_query(spark, args):
         n_windows = batch_df.count()
         rows = alerts.collect()
         if rows:
-            alerts.write.mode("append").parquet(args.output)
+            write_alerts(alerts, batch_id, args.output, args.sink_mode)
         alerts.unpersist()
+        if rows and args.crash_at_batch is not None and batch_id >= args.crash_at_batch:
+            crash_now(batch_id)
 
         bunched = [r for r in rows if r["is_bunching"]]
         if bunched and args.mongo:
             # Only real bunching goes to the operational alerts collection; filtered-out
             # close pairs (layover, one_parked, no_history) stay in Parquet for analysis.
-            from storage.mongo_sink import write_alerts
-            new = write_alerts([r.asDict() for r in bunched], alert_type="bunching")
+            # Aliased: a bare `import write_alerts` here would shadow the Parquet
+            # write_alerts above for the whole function (UnboundLocalError).
+            from storage.mongo_sink import write_alerts as mongo_write_alerts
+            new = mongo_write_alerts([r.asDict() for r in bunched], alert_type="bunching")
             print(f"  mongo alerts: {new} new of {len(bunched)}", flush=True)
         stats["windows"] += n_windows
         stats["close_pairs"] += len(rows)
@@ -294,6 +348,15 @@ def main():
     p.add_argument("--summary", default=None, help="write category counts to this JSON file at stop")
     p.add_argument("--mongo", action="store_true",
                    help="also write each alert to the MongoDB alerts collection (B11, MONGO_URI)")
+    # Experiment options (B25 design comparison). Defaults keep the normal behaviour.
+    p.add_argument("--sink-mode", choices=SINK_MODES, default="append",
+                   help="append = at-least-once alert writes; idempotent = overwrite per batch_id (exactly-once)")
+    p.add_argument("--max-offsets", type=int, default=None,
+                   help="Kafka source: at most this many records per micro-batch (pace a replay)")
+    p.add_argument("--progress-log", default=None,
+                   help="append one JSON line per micro-batch (state size, watermark drops, offsets)")
+    p.add_argument("--crash-at-batch", type=int, default=None,
+                   help="fault injection: SIGKILL the job after the first micro-batch >= N that wrote alerts")
     args = p.parse_args()
 
     spark = build_spark(use_kafka=(args.source == "kafka"))
@@ -306,10 +369,24 @@ def main():
 
     stop = {"requested": False}
     signal.signal(signal.SIGINT, lambda s, f: stop.update(requested=True))
+    logged = {"last": -1}
+
+    def log_progress():
+        if not args.progress_log:
+            return
+        new = [p for p in query.recentProgress if p["batchId"] > logged["last"]]
+        if new:
+            with open(args.progress_log, "a") as f:
+                for p in new:
+                    f.write(json.dumps(progress_record(p)) + "\n")
+            logged["last"] = new[-1]["batchId"]
+
     while query.isActive and not stop["requested"]:
-        time.sleep(1)
+        log_progress()
+        time.sleep(0.5)
     print("Stopping...")
     query.stop()
+    log_progress()
     print(f"Stopped. Route-windows checked: {stats['windows']} | close pairs: {stats['close_pairs']} | "
           f"bunching alerts: {stats['alerts']}")
     for c, n in sorted(stats["categories"].items(), key=lambda x: -x[1]):
