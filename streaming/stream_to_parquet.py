@@ -196,7 +196,7 @@ def main():
     query = write_stream(transform(events), args)
     extra = [write_latest_positions(events, args)] if args.mongo else []
     print(f"Streaming from {args.source} -> {args.output}"
-          f"{' + MongoDB latest_positions' if args.mongo else ''} (Ctrl+C to stop)")
+          f"{' + MongoDB latest_positions' if args.mongo else ''} (Ctrl+C to stop)", flush=True)
     report_progress(query, also_stop=extra)
 
 

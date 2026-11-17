@@ -13,14 +13,18 @@ LOG=logs/run_all_archive.log
 command -v java >/dev/null || { echo "FAIL: Java is not installed. Run: brew install openjdk@17"; exit 1; }
 python -c "import pyspark" 2>/dev/null || { echo "FAIL: pyspark is missing. Run: python -m pip install -r requirements.txt"; exit 1; }
 
-docker compose up -d
-until [ "$(docker inspect -f '{{.State.Health.Status}}' kafka 2>/dev/null)" = "healthy" ]; do
+docker compose up -d || { echo "FAIL: docker compose did not start. Is Docker running?"; exit 1; }
+for i in $(seq 1 40); do   # up to 2 minutes
+  [ "$(docker inspect -f '{{.State.Health.Status}}' kafka 2>/dev/null)" = "healthy" ] && break
   echo "waiting for Kafka..."; sleep 3
 done
+if [ "$(docker inspect -f '{{.State.Health.Status}}' kafka 2>/dev/null)" != "healthy" ]; then
+  echo "FAIL: Kafka was not healthy after 2 minutes. Is Docker running? Check: docker compose logs kafka"; exit 1
+fi
 
 echo "Starting the Spark archive job in the background..."
 KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-localhost:29092} \
-  python streaming/stream_to_parquet.py --source kafka > "$LOG" 2>&1 &
+  python -u streaming/stream_to_parquet.py --source kafka > "$LOG" 2>&1 &
 PID=$!
 trap 'kill -INT $PID 2>/dev/null' EXIT
 
