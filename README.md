@@ -27,7 +27,9 @@ GTFS-realtime feeds (511 / BART / VTA)
                           └──►  Parquet archive (data/, not committed)
 ```
 
-A full flow diagram will be added in `docs/`.
+Full flow schematic (B29), for the report and slides: [`docs/flow_diagram.svg`](docs/flow_diagram.svg) (vector) and [`docs/flow_diagram.png`](docs/flow_diagram.png) (3200×1952). Mermaid version (renders on GitHub): [`docs/flow_diagram.md`](docs/flow_diagram.md).
+
+![Pipeline flow diagram](docs/flow_diagram.png)
 
 ## Repository layout
 
@@ -37,7 +39,7 @@ A full flow diagram will be added in `docs/`.
 | `streaming/` | Spark Structured Streaming jobs and detectors |
 | `storage/` | MongoDB and warehouse schemas, sink code, sample queries |
 | `algorithms/` | Bloom filter, LSH, reservoir sampling, Flajolet-Martin, privacy |
-| `benchmarks/` | Benchmark harness, fault injection, results CSVs |
+| `benchmarks/` | Benchmark harness, fault injection (`FAULT_INJECTION.md`), design comparison (`DESIGN_COMPARISON.md`), results CSVs |
 | `notebooks/` | Exploration and analysis notebooks (each also exported to `.py`) |
 | `docs/` | Diagrams, meeting minutes, evidence for the rubric appendix |
 | `report/` | LaTeX source of the IEEE report (synced from Overleaf) |
