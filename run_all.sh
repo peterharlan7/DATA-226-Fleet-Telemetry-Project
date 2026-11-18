@@ -9,6 +9,8 @@ MODE=${1:-sim}   # sim = simulator, live = 511 feed
 AGENCIES=${AGENCIES:-SF,SC}
 mkdir -p logs data
 LOG=logs/run_all_archive.log
+# One Kafka address for every step. Without this, scripts that load .env can use a different port than Spark.
+export KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-localhost:29092}
 
 command -v java >/dev/null || { echo "FAIL: Java is not installed. Run: brew install openjdk@17"; exit 1; }
 python -c "import pyspark" 2>/dev/null || { echo "FAIL: pyspark is missing. Run: python -m pip install -r requirements.txt"; exit 1; }
@@ -22,9 +24,8 @@ if [ "$(docker inspect -f '{{.State.Health.Status}}' kafka 2>/dev/null)" != "hea
   echo "FAIL: Kafka was not healthy after 2 minutes. Is Docker running? Check: docker compose logs kafka"; exit 1
 fi
 
-echo "Starting the Spark archive job in the background..."
-KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-localhost:29092} \
-  python -u streaming/stream_to_parquet.py --source kafka > "$LOG" 2>&1 &
+echo "Starting the Spark archive job in the background (Kafka at $KAFKA_BOOTSTRAP_SERVERS)..."
+python -u streaming/stream_to_parquet.py --source kafka > "$LOG" 2>&1 &
 PID=$!
 trap 'kill -INT $PID 2>/dev/null' EXIT
 

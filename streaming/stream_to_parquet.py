@@ -15,6 +15,7 @@ Stop with Ctrl+C. Restarting continues where it stopped, thanks to the checkpoin
 """
 
 import argparse
+import glob
 import os
 import signal
 import sys
@@ -166,6 +167,9 @@ def report_progress(query, also_stop=()):
 
 
 def count_archive(spark, path):
+    if not glob.glob(os.path.join(path, "**", "*.parquet"), recursive=True):
+        print(f"Rows archived: 0  (no Parquet files in {path})")
+        return
     df = spark.read.parquet(path)
     print(f"Rows archived: {df.count()}  |  distinct event_id: {df.select('event_id').distinct().count()}")
     df.groupBy("event_date", "source").count().orderBy("event_date", "source").show()
