@@ -6,7 +6,8 @@ we picked? This re-runs the detector's own rule (bunching_pairs / classify_pair 
 detect_bunching.py) over the 24 h recording, offline, with different settings:
 
   min_move_m      how far a bus must move in the look-back to count as moving   (default 50 m)
-  min_history_s   how much look-back history a bus needs before we judge it     (default 30 s)
+  min_history_s   how much look-back history a bus needs before we judge it     (default 30 s;
+                  buses report about every 2 min, so values under ~120 s change nothing)
   lookback_s      how far back the detector looks                               (default 300 s)
 
 One setting changes at a time; the others stay at the defaults. Close pairs are found
@@ -35,7 +36,7 @@ from streaming.detect_bunching import (BUNCHING_CATEGORIES, _closest_pairs,  # n
 
 DEF_MOVE, DEF_HIST, DEF_LOOK = BUNCHING["min_move_m"], BUNCHING["min_history_s"], BUNCHING["lookback_s"]
 SETTINGS = ([("min_move_m", v, v, DEF_HIST, DEF_LOOK) for v in (25, 50, 75, 100)] +
-            [("min_history_s", v, DEF_MOVE, v, DEF_LOOK) for v in (15, 60)] +
+            [("min_history_s", v, DEF_MOVE, v, DEF_LOOK) for v in (15, 60, 120, 180)] +
             [("lookback_s", v, DEF_MOVE, DEF_HIST, v) for v in (180, 600)])
 CATS = ["tandem", "same_stop", "moving", "layover", "one_parked", "no_history"]
 

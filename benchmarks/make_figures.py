@@ -38,7 +38,7 @@ from algorithms.stream_algos import BloomFilter, FlajoletMartin  # noqa: E402
 
 RES = "benchmarks/results"
 OUT = "report/figures"
-COLD_JVM_RUN = "20261114_200826_r40000_t1_0"   # first run after a JVM start, excluded as in make_figures.py
+COLD_JVM_RUN = "20261114_200826_r40000_t1_0"   # first run after a cold JVM start (warm-up), excluded from the throughput chart
 AV_SECONDS = 20 * 11.0                          # 20 Argoverse 2 scenes of 11 s, played one after another
 
 # ---- palette (sampled from the slide deck) -------------------------------------------------------
@@ -116,9 +116,8 @@ def frame(title, subtitle, source, figsize=(13.33, 7.5), legend=None):
             if kind == "line":
                 fig.add_artist(plt.Line2D([x, x + 0.03], [top - 0.012] * 2, color=color, linewidth=3,
                                           transform=fig.transFigure))
-                if kind == "line":
-                    fig.add_artist(plt.Line2D([x + 0.015], [top - 0.012], marker="o", color=color,
-                                              markersize=8, transform=fig.transFigure))
+                fig.add_artist(plt.Line2D([x + 0.015], [top - 0.012], marker="o", color=color,
+                                          markersize=8, transform=fig.transFigure))
             elif kind == "hollow":
                 fig.add_artist(plt.Line2D([x + 0.015], [top - 0.012], marker="o", markerfacecolor="white",
                                           markeredgecolor=MUTED, markeredgewidth=2, markersize=9,
@@ -164,7 +163,7 @@ def bunching():
         return skipped.append("bunching")
     d = load_json("bunching_replay_summary.json")
     c, total = d["categories"], d["close_pairs"]
-    rows = [("Driving in tandem (within 40 m for 5+ min)", "tandem", True),
+    rows = [("Driving in tandem (within 40 m at 3+ shared reports)", "tandem", True),
             ("Both stopped at the same stop", "same_stop", True),
             ("Both moving, close together", "moving", True),
             ("Not enough recent reports to tell", "no_history", False),
@@ -204,9 +203,10 @@ def bart_knock_on():
         / (a["pairs"] - a["late_pairs"]) * 100
     late_min = d["settings"]["late"] // 60
     fig, top = frame(f"After a late BART train, the next one is late {late_after_late:.0f}% of the time",
-                     f"Share of trains reaching a station {late_min}+ minutes late, depending on whether the train "
-                     f"before it on the same line was late. Average for all trains: {base:.0f}%. "
-                     f"{a['pairs']:,} pairs of consecutive trains in 24 hours.",
+                     f"Share of trains {late_min}+ minutes late at a station, depending on whether the train before it on the "
+                     f"same line was late. Average for all trains: {base:.0f}%. {a['pairs']:,} pairs of consecutive "
+                     "trains in 24 hours. Delay = BART's latest estimate as each train reached the station "
+                     "(BART publishes no measured arrival times).",
                      "Data: BART GTFS-realtime trip updates, 24 h recording; streaming/analyze_delay_propagation.py (B15). "
                      "Correlation: one incident can delay several trains.")
     ax = fig.add_axes([0.12, 0.14, 0.80, top - 0.17])
@@ -232,8 +232,8 @@ def bart_by_hour():
     order = list(range(13, 24)) + list(range(0, 13))
     fig, top = frame("BART delays peaked around midnight and in the mid-afternoon",
                      "Share of BART arrivals 5+ minutes late, hour by hour, in the order the hours happened "
-                     f"(Nov 13 1 pm to Nov 14 noon). Gray hours had fewer than {min_arrivals} arrivals: "
-                     "too few trains for a fair percentage.",
+                     f"(Nov 13 1 pm to Nov 14 noon). Delay = BART's latest estimate as each train reached the "
+                     f"station. Gray hours had fewer than {min_arrivals} arrivals: too few for a fair percentage.",
                      "Data: BART GTFS-realtime trip updates, 24 h recording; streaming/analyze_delay_propagation.py (B15)")
     ax = fig.add_axes([0.09, 0.17, 0.86, top - 0.21])
     ymax = 40
@@ -241,7 +241,7 @@ def bart_by_hour():
         n = int(df.arrivals.get(h, 0))
         if n < min_arrivals:
             ax.axvspan(x - 0.5, x + 0.5, color=CONTEXT, alpha=0.45, linewidth=0)
-            ax.text(x, 1.2, f"{n}\ntrains" if n else "no\ndata", ha="center", va="bottom", fontsize=10, color=MUTED)
+            ax.text(x, 1.2, (f"{n}\ntrain" if n == 1 else f"{n}\ntrains") if n else "no\ndata", ha="center", va="bottom", fontsize=10, color=MUTED)
             continue
         v = df.late_share[h] * 100
         ax.bar(x, v, color=STEEL, width=0.72)
@@ -272,7 +272,8 @@ def fairness():
     fig, top = frame("The same detector sees some routes much less clearly than others",
                      "For each route: the share of possible bunching cases the detector could not check, because the "
                      f"buses had not reported recently enough. {int((worst10.source == 'SC').sum())} of the 10 worst "
-                     f"routes are VTA; the worst routes are about {p90 / p10:.1f}x the best (90th vs 10th percentile).",
+                     f"routes are VTA" + (f"; the worst routes are about {p90 / p10:.1f}x the best (90th vs 10th percentile)."
+                                             if p10 > 0 else "."),
                      f"Data: 24 h replay, {len(df)} routes with 30+ close pairs; streaming/analyze_fairness.py (B27)",
                      legend=[("VTA", VTA, "box"), ("Muni", MUNI, "box")])
     ax = fig.add_axes([0.10, 0.17, 0.85, top - 0.20])
@@ -286,7 +287,7 @@ def fairness():
                 xytext=(-6, 140), textcoords="offset points", fontsize=14, fontweight="bold", color=MUNI, ha="right",
                 arrowprops=dict(arrowstyle="-", color=MUNI, lw=1.2))
     ax.set_xticks([]); ax.set_xlim(-1, len(df))
-    ax.set_xlabel(f"{len(df)} routes, from least reliable (left) to most reliable (right)")
+    ax.set_xlabel(f"{len(df)} routes, from least data coverage (left) to most (right)")
     ax.set_ylabel("Cases the detector\ncould not check (%)")
     ax.set_ylim(0, df.no_history.max() * 110)
     ygrid(ax)
