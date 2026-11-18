@@ -1,0 +1,155 @@
+{
+  "bloom": {
+    "distinct_ids": 567147,
+    "probes": 1000000,
+    "exact_set_bytes_measured": 67820662,
+    "rows": [
+      {
+        "target_fp": 0.2,
+        "memory_bytes": 237482,
+        "hashes_k": 2,
+        "bits_per_item": 3.35,
+        "measured_fp": 0.202615,
+        "false_positive_hits": 202615,
+        "expected_hits": 200000
+      },
+      {
+        "target_fp": 0.1,
+        "memory_bytes": 339759,
+        "hashes_k": 3,
+        "bits_per_item": 4.79,
+        "measured_fp": 0.100922,
+        "false_positive_hits": 100922,
+        "expected_hits": 100000
+      },
+      {
+        "target_fp": 0.05,
+        "memory_bytes": 442037,
+        "hashes_k": 4,
+        "bits_per_item": 6.24,
+        "measured_fp": 0.050227,
+        "false_positive_hits": 50227,
+        "expected_hits": 50000
+      },
+      {
+        "target_fp": 0.01,
+        "memory_bytes": 679518,
+        "hashes_k": 7,
+        "bits_per_item": 9.59,
+        "measured_fp": 0.010155,
+        "false_positive_hits": 10155,
+        "expected_hits": 10000
+      },
+      {
+        "target_fp": 0.001,
+        "memory_bytes": 1019276,
+        "hashes_k": 10,
+        "bits_per_item": 14.38,
+        "measured_fp": 0.000962,
+        "false_positive_hits": 962,
+        "expected_hits": 1000
+      },
+      {
+        "target_fp": 0.0001,
+        "memory_bytes": 1359035,
+        "hashes_k": 13,
+        "bits_per_item": 19.17,
+        "measured_fp": 9.4e-05,
+        "false_positive_hits": 94,
+        "expected_hits": 100
+      }
+    ]
+  },
+  "fm": [
+    {
+      "source": "SC",
+      "num_hashes": 8,
+      "memory_bytes": 64,
+      "true": 525,
+      "seeds": 20,
+      "mean_error_pct": 20.24,
+      "max_error_pct": 94.44
+    },
+    {
+      "source": "SF",
+      "num_hashes": 8,
+      "memory_bytes": 64,
+      "true": 877,
+      "seeds": 20,
+      "mean_error_pct": 23.5,
+      "max_error_pct": 50.95
+    },
+    {
+      "source": "SC",
+      "num_hashes": 16,
+      "memory_bytes": 128,
+      "true": 525,
+      "seeds": 20,
+      "mean_error_pct": 12.12,
+      "max_error_pct": 38.1
+    },
+    {
+      "source": "SF",
+      "num_hashes": 16,
+      "memory_bytes": 128,
+      "true": 877,
+      "seeds": 20,
+      "mean_error_pct": 12.77,
+      "max_error_pct": 27.41
+    },
+    {
+      "source": "SC",
+      "num_hashes": 32,
+      "memory_bytes": 256,
+      "true": 525,
+      "seeds": 20,
+      "mean_error_pct": 10.93,
+      "max_error_pct": 37.49
+    },
+    {
+      "source": "SF",
+      "num_hashes": 32,
+      "memory_bytes": 256,
+      "true": 877,
+      "seeds": 20,
+      "mean_error_pct": 11.64,
+      "max_error_pct": 27.41
+    },
+    {
+      "source": "SC",
+      "num_hashes": 64,
+      "memory_bytes": 512,
+      "true": 525,
+      "seeds": 20,
+      "mean_error_pct": 12.82,
+      "max_error_pct": 26.55
+    },
+    {
+      "source": "SF",
+      "num_hashes": 64,
+      "memory_bytes": 512,
+      "true": 877,
+      "seeds": 20,
+      "mean_error_pct": 9.09,
+      "max_error_pct": 24.52
+    },
+    {
+      "source": "SC",
+      "num_hashes": 128,
+      "memory_bytes": 1024,
+      "true": 525,
+      "seeds": 20,
+      "mean_error_pct": 6.95,
+      "max_error_pct": 15.62
+    },
+    {
+      "source": "SF",
+      "num_hashes": 128,
+      "memory_bytes": 1024,
+      "true": 877,
+      "seeds": 20,
+      "mean_error_pct": 5.6,
+      "max_error_pct": 16.4
+    }
+  ]
+}
