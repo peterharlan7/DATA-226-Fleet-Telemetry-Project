@@ -8,11 +8,11 @@ A streaming pipeline that ingests live GTFS-realtime feeds (511, BART, VTA) thro
 
 | Sprint | Dates | Goal | Status |
 | --- | --- | --- | --- |
-| 1 | Oct 19 – Oct 25 | Setup + live GTFS-rt data in Kafka | In progress |
-| 2 | Oct 26 – Nov 1 | Spark stream, storage layers, intermediate report | Not started |
-| 3 | Nov 2 – Nov 8 | Detectors, Bloom filter, LSH | Not started |
-| 4 | Nov 9 – Nov 15 | Benchmarks, privacy, streaming algorithms, slides | Not started |
-| Wrap-up | Nov 16 – Nov 17 | Final report and presentation | Not started |
+| 1 | Oct 19 – Oct 25 | Setup + live GTFS-rt data in Kafka | Done |
+| 2 | Oct 26 – Nov 1 | Spark stream, storage layers, intermediate report | Done (MongoDB + Parquet; ClickHouse/DuckDB warehouse not built) |
+| 3 | Nov 2 – Nov 8 | Detectors, Bloom filter, LSH | Done |
+| 4 | Nov 9 – Nov 15 | Benchmarks, privacy, streaming algorithms, slides | Done (benchmarks, fault injection, privacy, streaming algorithms; flow diagram for slides) |
+| Wrap-up | Nov 16 – Nov 17 | Final report and presentation | In progress |
 
 ## Architecture
 
@@ -21,11 +21,12 @@ GTFS-realtime feeds (511 / BART / VTA)
         │  Python producers (ingestion/)
         ▼
    Apache Kafka  ──►  Spark Structured Streaming (streaming/)
-                          │  windowed features, detectors, Bloom filter dedup
+                          │  windowed features, detectors, streaming algorithms
                           ├──►  Operational store: MongoDB (latest position per vehicle, alerts)
-                          ├──►  Warehouse: ClickHouse or DuckDB (alerts, summaries)
-                          └──►  Parquet archive (data/, not committed)
+                          └──►  Parquet archive (data/, not committed): raw events and alerts
 ```
+
+The Bloom filter (B17) measures duplicates on the stream; the archive job itself does not deduplicate. The planned ClickHouse/DuckDB warehouse was not built: Parquet is the analytical store.
 
 Full flow schematic (B29), for the report and slides: [`docs/flow_diagram.svg`](docs/flow_diagram.svg) (vector) and [`docs/flow_diagram.png`](docs/flow_diagram.png) (3200×1952). Mermaid version (renders on GitHub): [`docs/flow_diagram.md`](docs/flow_diagram.md).
 
@@ -37,7 +38,7 @@ Full flow schematic (B29), for the report and slides: [`docs/flow_diagram.svg`](
 | --- | --- |
 | `ingestion/` | Kafka producers for GTFS-realtime feeds and replay |
 | `streaming/` | Spark Structured Streaming jobs and detectors |
-| `storage/` | MongoDB and warehouse schemas, sink code, sample queries |
+| `storage/` | MongoDB sink code (latest positions, alerts) and its tests |
 | `algorithms/` | Bloom filter, LSH, reservoir sampling, Flajolet-Martin, privacy |
 | `benchmarks/` | Benchmark harness, fault injection (`FAULT_INJECTION.md`), design comparison (`DESIGN_COMPARISON.md`), results CSVs |
 | `notebooks/` | Exploration and analysis notebooks (each also exported to `.py`) |
@@ -83,14 +84,15 @@ Full flow schematic (B29), for the report and slides: [`docs/flow_diagram.svg`](
 1. Install Docker Desktop and Python 3.10+.
 2. Clone the repo and create a virtual environment:
    ```
-   git clone https://github.com/<your-account>/fleet-telemetry-pipeline.git
-   cd fleet-telemetry-pipeline
+   git clone https://github.com/peterharlan7/DATA-226-Fleet-Telemetry-Project.git
+   cd DATA-226-Fleet-Telemetry-Project
    python -m venv .venv
    source .venv/bin/activate      # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
 3. Copy `.env.example` to `.env` and add your 511.org API key.
-4. Start Kafka and Spark: `docker compose up -d` (docker-compose.yml added in backlog item B2).
+4. Start Kafka and MongoDB: `docker compose up -d`. Kafka is on `localhost:29092`. The Spark jobs run in local mode on your computer (they need Java 17), not in a container.
+5. Smoke test the whole path with simulated data: `./run_all.sh` (or `./run_all.sh live` for one pass over the 511 feeds).
 
 ## Project links
 - https://github.com/peterharlan7/DATA-226-Fleet-Telemetry-Project/tree/main
